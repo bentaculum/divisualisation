@@ -19,8 +19,15 @@ from pathlib import Path
 import napari
 from napari.utils.colormaps import label_colormap
 from napari.utils.colormaps.colormap_utils import vispy_or_mpl_colormap
-from .utils import crop_borders, rescale_intensity, str2bool, str2path
-from trackastra.tracking import load_ctc_graph, graph_to_napari_tracks
+from utils import (
+    crop_borders,
+    rescale_intensity,
+    str2bool,
+    str2path,
+    load_tiff_timeseries,
+)
+
+# from trackastra.tracking import load_ctc_graph, graph_to_napari_tracks
 from tifffile import imread
 import skimage
 import numpy as np
@@ -39,20 +46,23 @@ logger = logging.getLogger(__name__)
 
 pp = pprint.PrettyPrinter(indent=4)
 
-gt_data = load_ctc_data(
-    "downloads/Fluo-N2DL-HeLa/01_GT/TRA",
-    "downloads/Fluo-N2DL-HeLa/01_GT/TRA/man_track.txt",
+gt = load_ctc_data(
+    "data/bacteria/TRA",
+    "data/bacteria/TRA/man_track.txt",
     name="gt",
 )
-pred_data = load_ctc_data(
-    "sample-data/Fluo-N2DL-HeLa/01_RES",
-    "sample-data/Fluo-N2DL-HeLa/01_RES/res_track.txt",
-    name="pred",
+pred = load_ctc_data(
+    "data/bacteria/RES",
+    "data/bacteria/RES/man_track.txt",
+    name="res",
 )
 
+img = load_tiff_timeseries(Path("data/bacteria/img"))
+
+
 ctc_results, ctc_matched = run_metrics(
-    gt_data=gt_data,
-    pred_data=pred_data,
+    gt_data=gt,
+    pred_data=pred,
     matcher=CTCMatcher(),
     metrics=[CTCMetrics()],
 )

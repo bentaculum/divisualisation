@@ -1,9 +1,63 @@
 import logging
 from pathlib import Path
 import numpy as np
+import tifffile
+from tqdm import tqdm
 from skimage.util import img_as_ubyte
 
 logger = logging.getLogger(__name__)
+
+
+def load_tiff_timeseries(
+    dir: Path,
+    dtype: str | type | None = None,
+    downscale: tuple[int, ...] | None = None,
+    start_frame: int = 0,
+    end_frame: int | None = None,
+) -> np.ndarray:
+    """Loads a folder of `.tif` or `.tiff` files into a numpy array.
+    Each file is interpreted as a frame of a time series.
+
+    Args:
+        folder:
+        dtype:
+        downscale: One int for each dimension of the data. Avoids memory overhead.
+        start_frame: The first frame to load.
+        end_frame: The last frame to load.
+
+    Returns:
+        np.ndarray: The loaded data.
+    """
+    # TODO make safe for label arrays
+    logger.debug(f"Loading tiffs from {dir} as {dtype}")
+    files = sorted(list(dir.glob("*.tif")) + list(dir.glob("*.tiff")))[
+        start_frame:end_frame
+    ]
+    shape = tifffile.imread(files[0]).shape
+    if downscale:
+        assert len(downscale) == len(shape)
+    else:
+        downscale = (1,) * len(shape)
+
+    files = files[:: downscale[0]]
+
+    x = []
+    for f in tqdm(
+        files,
+        leave=False,
+        desc=f"Loading [{start_frame}:{end_frame}:{downscale[0]}]",
+    ):
+        _x = tifffile.imread(f)
+        if dtype:
+            _x = _x.astype(dtype)
+        assert _x.shape == shape
+        slices = tuple(slice(None, None, d) for d in downscale[1:])
+        _x = _x[slices]
+        x.append(_x)
+
+    x = np.stack(x)
+    logger.debug(f"Loaded array of shape {x.shape} from {dir}")
+    return x
 
 
 def crop_borders(x):
