@@ -25,7 +25,9 @@ from utils import (
     str2bool,
     str2path,
     load_tiff_timeseries,
+    graph_to_napari_tracks,
 )
+from create_layers import visualize_gt, visualize_edge_errors
 
 # from trackastra.tracking import load_ctc_graph, graph_to_napari_tracks
 from tifffile import imread
@@ -68,72 +70,42 @@ ctc_results, ctc_matched = run_metrics(
 )
 pp.pprint(ctc_results)
 
+gt_graph = ctc_matched.gt_graph
+pred_graph = ctc_matched.pred_graph
+# networkx graph at traccuracy.TrackingGraph.graph
 
-def visualize_edge_errors(
-    viewer,
-    masks_tracked,
-    masks_original,
-    scale,
-    df_edge_errors=None,
-    feats="",
-    translate=[0, 0, 0],
-):
-    errors_layer = {}
-    errors_data = {}
-    for i, (error, reference_masks, cmap) in enumerate(
-        zip(
-            ("is_fn", "is_fp"),
-            (masks_original, masks_tracked),
-            # ("hsv", "gray_r"),
-            # ("PiYG", "PiYG"),
-            ("cool", "cool"),
-        )
-    ):
-        np.zeros_like(masks_original)
-        edge_error_tracks = []
-        edge_error_props = {"error_type": []}
-        for edge_id, row in df_edge_errors[df_edge_errors[error]].iterrows():
-            if row.t_u >= len(reference_masks) or row.t_v >= len(reference_masks):
-                continue
+gt_tracks, gt_tracks_graph, gt_properties = graph_to_napari_tracks(
+    gt_graph.graph,
+    properties=["t"],
+)
 
-            edge_id += 1  # avoid track id 0
+v = napari.current_viewer()
+if v is not None:
+    v.close()
+v = napari.Viewer()
+v.window._qt_window.showFullScreen()
 
-            c_u = np.argwhere(reference_masks[row.t_u] == int(row.u)).mean(axis=0)
-            edge_error_tracks.append([edge_id, row.t_u, *c_u])
-            edge_error_props["error_type"].append(i)
+v.theme = "light"
 
-            c_v = np.argwhere(reference_masks[row.t_v] == int(row.v)).mean(axis=0)
-            edge_error_tracks.append([edge_id, row.t_v, *c_v])
-            edge_error_props["error_type"].append(i)
+scale = (6, 1, 1)  # TODO remove hardcoded params
+image_layer, labels_layer, _, gt_tracks_layer, gt_tracks_data = visualize_gt(
+    v,
+    img,
+    gt.segmentation,
+    gt_tracks,
+    gt_tracks_graph,
+    gt_properties,
+    # TODO remove hardcoded params
+    frame=10,
+    scale=scale,
+)
 
-        edge_error_props = {k: np.array(v) for k, v in edge_error_props.items()}
 
-        if len(edge_error_tracks) > 0:
-            layer = viewer.add_tracks(
-                data=np.stack(edge_error_tracks),
-                properties=edge_error_props,
-                color_by="error_type",
-                # colormap=cmap,
-                colormaps_dict={
-                    "error_type": vispy_or_mpl_colormap(cmap),
-                },
-                scale=scale,
-                # tail_width=8,
-                tail_width=5,
-                head_length=1,
-                tail_length=1,
-                visible=True,
-                blending="translucent_no_depth",
-                opacity=1.0,
-                translate=translate,
-                name=error,
-            )
-            errors_layer[error] = layer
-            errors_data[error] = {
-                "tracks": np.stack(edge_error_tracks),
-                "properties": edge_error_props,
-            }
-        else:
-            logger.info(f"No edge errors of type {error}")
-
-    return errors_layer, errors_data
+errors_layer, errors_data = visualize_edge_errors(
+    viewer=v,
+    gt_graph=gt_graph,
+    pred_graph=pred_graph,
+    masks_original=gt.segmentation,
+    masks_tracked=pred.segmentation,
+    scale=scale,
+)
