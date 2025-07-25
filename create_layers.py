@@ -72,30 +72,37 @@ def visualize_gt(
         ]
     )
 
+    # Hack: Now every other time point actually only shows the plane of a single time point
+    # Important to not overlay masks from different time points, which is ugly
+    xc = np.repeat(xc, 2, axis=0)
+    mc = np.repeat(mc, 2, axis=0)
+
+    xc_broadcast = np.broadcast_to(xc[None, ...], (len(xc),) + xc.shape)
     img_layer = v.add_image(
         # np.expand_dims(xc, 0),
-        xc,
+        xc_broadcast,
         scale=scale,
         # Somehow rotation around a self-chosen origin does not work
         # Error msg: Non-orthogonal slicing is being requested, but is not fully supported. Data is displayed without applying an out-of-slice rotation or shear component.
-        translate=np.array([frame, crop[0], crop[2]]) * scale,
+        # translate=np.array([frame, crop[0], crop[2]]) * scale,
         colormap="gray",
         rendering="translucent",
-        depiction="plane",
+        # depiction="plane",
         contrast_limits=[0.0, 0.4],
     )
+    mc_broadcast = np.broadcast_to(mc[None, ...], (len(mc),) + mc.shape)
     labels_layer = v.add_labels(
         # np.expand_dims(mc, 0),
-        mc,
+        mc_broadcast,
         scale=scale,
-        translate=np.array([frame, crop[0], crop[2]]) * scale,
+        # translate=np.array([frame, crop[0], crop[2]]) * scale,
         # rendering="iso_categorical",
         rendering="translucent",
         opacity=1.0,
         # seed=0.12,
-        depiction="plane",
+        # depiction="plane",
     )
-    labels_layer = None
+    # labels_layer = None
 
     # Box around the image
     # v.layers[0].bounding_box.visible = True
@@ -124,6 +131,9 @@ def visualize_gt(
 
     properties = {"gt": properties["gt"]}
 
+    tracks[:, 1] = tracks[:, 1] * 2  # Double time points to match image
+    tracks = np.concat([tracks[:, 0:1], tracks[:, 1:2], tracks[:, 1:]], axis=1)
+
     logger.info("Adding gt tracks")
     gt_tracks_layer = v.add_tracks(
         data=tracks,
@@ -143,9 +153,12 @@ def visualize_gt(
             "gt": vispy_or_mpl_colormap("Greens"),
         },
         # tail_width=2.0,
-        tail_width=0.5,
+        tail_width=2,
+        tail_length=1000,
         opacity=1.0,
     )
+    # gt_tracks_layer = None
+
     return (
         img_layer,
         labels_layer,
@@ -207,8 +220,11 @@ def visualize_edge_errors(
         edge_error_props = {k: np.array(v) for k, v in edge_error_props.items()}
 
         if len(edge_error_tracks) > 0:
+            tracks = np.array(edge_error_tracks)
+            tracks[:, 1] = tracks[:, 1] * 2  # Double time points to match image
+            tracks = np.concat([tracks[:, 0:1], tracks[:, 1:2], tracks[:, 1:]], axis=1)
             layer = viewer.add_tracks(
-                data=np.stack(edge_error_tracks),
+                data=tracks,
                 properties=edge_error_props,
                 color_by="error_type",
                 # colormap=cmap,
@@ -219,7 +235,7 @@ def visualize_edge_errors(
                 # tail_width=8,
                 tail_width=5,
                 head_length=1,
-                tail_length=1,
+                tail_length=1000,
                 visible=True,
                 blending="translucent_no_depth",
                 opacity=1.0,
@@ -228,7 +244,7 @@ def visualize_edge_errors(
             )
             errors_layer[error] = layer
             errors_data[error] = {
-                "tracks": np.stack(edge_error_tracks),
+                "tracks": tracks,
                 "properties": edge_error_props,
             }
         else:

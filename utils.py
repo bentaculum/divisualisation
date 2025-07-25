@@ -223,7 +223,9 @@ def graph_to_napari_tracks(
         start = cs[0]
         if start in track_end_to_track_id and len(cs) > 1:
             tracks_graph[label] = track_end_to_track_id[start]
-            nodes = cs[1:]
+            # nodes = cs[1:]
+            # Include division edges as first edge of chain
+            nodes = cs
         else:
             nodes = cs
 

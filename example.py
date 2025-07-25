@@ -83,11 +83,11 @@ v = napari.current_viewer()
 if v is not None:
     v.close()
 v = napari.Viewer()
-v.window._qt_window.showFullScreen()
+# v.window._qt_window.showFullScreen()
 
 v.theme = "light"
 
-scale = (6, 1, 1)  # TODO remove hardcoded params
+scale = (7, 7, 1, 1)  # TODO remove hardcoded params
 image_layer, labels_layer, _, gt_tracks_layer, gt_tracks_data = visualize_gt(
     v,
     img,
@@ -100,6 +100,10 @@ image_layer, labels_layer, _, gt_tracks_layer, gt_tracks_data = visualize_gt(
     scale=scale,
 )
 
+v.dims.ndisplay = 3
+v.camera.angles = (27.919484296382873, -49.86671510905139, -35.8190766165135)
+v.camera.perspective = 27
+
 
 errors_layer, errors_data = visualize_edge_errors(
     viewer=v,
@@ -109,3 +113,43 @@ errors_layer, errors_data = visualize_edge_errors(
     masks_tracked=pred.segmentation,
     scale=scale,
 )
+
+
+# Update clipping plane based on time (axis 0)
+def update_clipping_plane(event=None):
+    t = v.dims.point[0]
+    # Move clipping plane along Z axis to t (or adjust axis as needed)
+    clipping_planes_img = [
+        {
+            "position": (t - 1, 0, 0),
+            "normal": (1, 0, 0),
+            "enabled": True,
+        },
+        {
+            "position": (t, 0, 0),
+            "normal": (-1, 0, 0),
+            "enabled": True,
+        },
+    ]
+    clipping_planes_tracks = [
+        {
+            "position": (t - 1, 0, 0),
+            "normal": (1, 0, 0),
+            "enabled": False,
+        },
+        {
+            "position": (t, 0, 0),
+            "normal": (-1, 0, 0),
+            "enabled": True,
+        },
+    ]
+    image_layer.experimental_clipping_planes = clipping_planes_img
+    labels_layer.experimental_clipping_planes = clipping_planes_img
+    gt_tracks_layer.experimental_clipping_planes = clipping_planes_tracks
+    # for name, layer in errors_layer.items():
+    # layer.experimental_clipping_planes = clipping_planes
+
+
+# Connect event
+v.dims.events.point.connect(update_clipping_plane)
+v.dims.set_current_step(0, image_layer.data.shape[0])
