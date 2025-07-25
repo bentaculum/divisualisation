@@ -57,52 +57,53 @@ def visualize_gt(
     scale,
     crop=[0, 0, 0, 0],
 ):
-    assert x.ndim == 3
+    # assert x.ndim == 3
     # Fix cropping
-    crop[1] = None if crop[1] == 0 else -crop[1]
-    crop[3] = None if crop[3] == 0 else -crop[3]
+    # crop[1] = None if crop[1] == 0 else -crop[1]
+    # crop[3] = None if crop[3] == 0 else -crop[3]
 
-    xc = x[:, crop[0] : crop[1], crop[2] : crop[3]]
-    mc = masks[:, crop[0] : crop[1], crop[2] : crop[3]]
+    xc = x
+    mc = masks
+    # # xc = x[:, crop[0] : crop[1], crop[2] : crop[3]]
+    # mc = masks[:, crop[0] : crop[1], crop[2] : crop[3]]
 
     xc = np.stack(
         [
-            rescale_intensity(_x, pmin=1, pmax=99.8, clip=False)
+            rescale_intensity(_x, pmin=1, pmax=99.8, clip=False, subsample=8)
             for _x in tqdm(xc, desc="Rescale intensity")
         ]
     )
 
     # Hack: Now every other time point actually only shows the plane of a single time point
     # Important to not overlay masks from different time points, which is ugly
-    xc = np.repeat(xc, 2, axis=0)
-    mc = np.repeat(mc, 2, axis=0)
+    # 2x memory overhead
 
-    xc_broadcast = np.broadcast_to(xc[None, ...], (len(xc),) + xc.shape)
+    # xc_broadcast = np.broadcast_to(xc[None, ...], (len(xc),) + xc.shape)
     img_layer = v.add_image(
         # np.expand_dims(xc, 0),
-        xc_broadcast,
+        xc,
         scale=scale,
         # Somehow rotation around a self-chosen origin does not work
         # Error msg: Non-orthogonal slicing is being requested, but is not fully supported. Data is displayed without applying an out-of-slice rotation or shear component.
         # translate=np.array([frame, crop[0], crop[2]]) * scale,
         colormap="gray",
-        rendering="translucent",
+        rendering="mip",
         # depiction="plane",
-        contrast_limits=[0.0, 0.4],
+        # contrast_limits=[0.0, 0.4],
     )
     mc_broadcast = np.broadcast_to(mc[None, ...], (len(mc),) + mc.shape)
-    labels_layer = v.add_labels(
-        # np.expand_dims(mc, 0),
-        mc_broadcast,
-        scale=scale,
-        # translate=np.array([frame, crop[0], crop[2]]) * scale,
-        # rendering="iso_categorical",
-        rendering="translucent",
-        opacity=1.0,
-        # seed=0.12,
-        # depiction="plane",
-    )
-    # labels_layer = None
+    # labels_layer = v.add_labels(
+    #     # np.expand_dims(mc, 0),
+    #     mc_broadcast,
+    #     scale=scale,
+    #     # translate=np.array([frame, crop[0], crop[2]]) * scale,
+    #     # rendering="iso_categorical",
+    #     rendering="translucent",
+    #     opacity=1.0,
+    #     # seed=0.12,
+    #     # depiction="plane",
+    # )
+    labels_layer = None
 
     # Box around the image
     # v.layers[0].bounding_box.visible = True
@@ -131,10 +132,14 @@ def visualize_gt(
 
     properties = {"gt": properties["gt"]}
 
-    tracks[:, 1] = tracks[:, 1] * 2  # Double time points to match image
-    tracks = np.concat([tracks[:, 0:1], tracks[:, 1:2], tracks[:, 1:]], axis=1)
+    # tracks[:, 1] = tracks[:, 1] * 2  # Double time points to match image
+    # tracks = np.concat([tracks[:, 0:1], tracks[:, 1:2], tracks[:, 1:]], axis=1)
 
     logger.info("Adding gt tracks")
+    # print(tracks)
+    # tracks[:, -3] *= 10
+    # print(tracks)
+
     gt_tracks_layer = v.add_tracks(
         data=tracks,
         # graph=tracks_graph,

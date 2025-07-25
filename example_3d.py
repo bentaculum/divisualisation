@@ -48,18 +48,32 @@ logger = logging.getLogger(__name__)
 
 pp = pprint.PrettyPrinter(indent=4)
 
+# gt = load_ctc_data(
+#     "/Users/bgallusser/data/ctc/Fluo-C3DL-MDA231/01_GT/TRA",
+#     "/Users/bgallusser/data/ctc/Fluo-C3DL-MDA231/01_GT/TRA/man_track.txt",
+#     name="gt",
+# )
+# pred = load_ctc_data(
+#     "/Users/bgallusser/data/ctc/Fluo-C3DL-MDA231/01_RES_trackastra",
+#     "/Users/bgallusser/data/ctc/Fluo-C3DL-MDA231/01_RES_trackastra/man_track.txt",
+#     name="res",
+# )
+
 gt = load_ctc_data(
-    "data/bacteria/TRA",
-    "data/bacteria/TRA/man_track.txt",
+    "/Users/bgallusser/code/traccuracy/downloads/Fluo-N3DH-CE/01_GT/TRA",
+    "/Users/bgallusser/code/traccuracy/downloads/Fluo-N3DH-CE/01_GT/TRA/man_track.txt",
     name="gt",
 )
 pred = load_ctc_data(
-    "data/bacteria/RES",
-    "data/bacteria/RES/man_track.txt",
-    name="res",
+    "/Users/bgallusser/code/traccuracy/downloads/Fluo-N3DH-CE/01_GT/TRA",
+    "/Users/bgallusser/code/traccuracy/downloads/Fluo-N3DH-CE/01_GT/TRA/man_track.txt",
+    name="gt",
 )
 
-img = load_tiff_timeseries(Path("data/bacteria/img"))
+
+img = load_tiff_timeseries(
+    Path("/Users/bgallusser/code/traccuracy/downloads/Fluo-N3DH-CE/01")
+)
 
 
 ctc_results, ctc_matched = run_metrics(
@@ -87,7 +101,7 @@ v = napari.Viewer()
 
 v.theme = "light"
 
-scale = (7, 7, 1, 1)  # TODO remove hardcoded params
+scale = (1, 1, 1, 1)  # TODO remove hardcoded params
 image_layer, labels_layer, _, gt_tracks_layer, gt_tracks_data = visualize_gt(
     v,
     img,
@@ -105,32 +119,20 @@ v.camera.angles = (27.919484296382873, -49.86671510905139, -35.8190766165135)
 v.camera.perspective = 27
 
 
-errors_layer, errors_data = visualize_edge_errors(
-    viewer=v,
-    gt_graph=gt_graph,
-    pred_graph=pred_graph,
-    masks_original=gt.segmentation,
-    masks_tracked=pred.segmentation,
-    scale=scale,
-)
+# errors_layer, errors_data = visualize_edge_errors(
+#     viewer=v,
+#     gt_graph=gt_graph,
+#     pred_graph=pred_graph,
+#     masks_original=gt.segmentation,
+#     masks_tracked=pred.segmentation,
+#     scale=scale,
+# )
 
 
 # Update clipping plane based on time (axis 0)
 def update_clipping_plane(event=None):
     t = v.dims.point[0]
     # Move clipping plane along Z axis to t (or adjust axis as needed)
-    clipping_planes_img = [
-        {
-            "position": (t - 1, 0, 0),
-            "normal": (1, 0, 0),
-            "enabled": True,
-        },
-        {
-            "position": (t, 0, 0),
-            "normal": (-1, 0, 0),
-            "enabled": True,
-        },
-    ]
     clipping_planes_tracks = [
         {
             "position": (t - 1, 0, 0),
@@ -138,14 +140,15 @@ def update_clipping_plane(event=None):
             "enabled": False,
         },
         {
-            "position": (t, 0, 0),
+            "position": (t * 10, 0, 0),
             "normal": (-1, 0, 0),
             "enabled": True,
         },
     ]
-    image_layer.experimental_clipping_planes = clipping_planes_img
-    labels_layer.experimental_clipping_planes = clipping_planes_img
+    image_layer.affine.translate[1] = t * 10
+    # labels_layer.experimental_clipping_planes = clipping_planes_img
     gt_tracks_layer.experimental_clipping_planes = clipping_planes_tracks
+    # gt_tracks_layer.affine.translate[1] = t * 10
     # for name, layer in errors_layer.items():
     # layer.experimental_clipping_planes = clipping_planes
 
@@ -153,5 +156,3 @@ def update_clipping_plane(event=None):
 # Connect event
 v.dims.events.point.connect(update_clipping_plane)
 v.dims.set_current_step(0, image_layer.data.shape[0])
-
-# TODO add widget with slider, position at the bottom of the viewer
