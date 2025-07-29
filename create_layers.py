@@ -67,12 +67,12 @@ def visualize_gt(
     # # xc = x[:, crop[0] : crop[1], crop[2] : crop[3]]
     # mc = masks[:, crop[0] : crop[1], crop[2] : crop[3]]
 
-    xc = np.stack(
-        [
-            rescale_intensity(_x, pmin=1, pmax=99.8, clip=False, subsample=8)
-            for _x in tqdm(xc, desc="Rescale intensity")
-        ]
-    )
+    # xc = np.stack(
+    #     [
+    #         rescale_intensity(_x, pmin=1, pmax=99.8, clip=False, subsample=16)
+    #         for _x in tqdm(xc, desc="Rescale intensity")
+    #     ]
+    # )
 
     # Hack: Now every other time point actually only shows the plane of a single time point
     # Important to not overlay masks from different time points, which is ugly
@@ -145,7 +145,7 @@ def visualize_gt(
         # graph=tracks_graph,
         name="gt_tracks",
         properties=properties,
-        scale=scale,
+        # scale=scale,
         color_by="gt",
         blending="translucent_no_depth",
         colormaps_dict={
@@ -226,7 +226,7 @@ def visualize_edge_errors(
 
         if len(edge_error_tracks) > 0:
             tracks = np.array(edge_error_tracks)
-            tracks[:, 1] = tracks[:, 1] * 2  # Double time points to match image
+            # tracks[:, 1] = tracks[:, 1] * 2  # Double time points to match image
             tracks = np.concat([tracks[:, 0:1], tracks[:, 1:2], tracks[:, 1:]], axis=1)
             layer = viewer.add_tracks(
                 data=tracks,

@@ -6,6 +6,7 @@ import urllib.request
 import zipfile
 
 from tqdm import tqdm
+import pickle
 
 from traccuracy import run_metrics
 from traccuracy.loaders import load_ctc_data
@@ -58,50 +59,63 @@ pp = pprint.PrettyPrinter(indent=4)
 #     "/Users/bgallusser/data/ctc/Fluo-C3DL-MDA231/01_RES_trackastra/man_track.txt",
 #     name="res",
 # )
+if not "gt" in locals():
+    gt = load_ctc_data(
+        "/Users/bgallusser/code/traccuracy/downloads/Fluo-N3DH-CE/01_GT/TRA",
+        "/Users/bgallusser/code/traccuracy/downloads/Fluo-N3DH-CE/01_GT/TRA/man_track.txt",
+        run_checks=False,
+        name="gt",
+    )
+    pred = load_ctc_data(
+        "/Users/bgallusser/code/traccuracy/downloads/Fluo-N3DH-CE/01_GT/TRA",
+        "/Users/bgallusser/code/traccuracy/downloads/Fluo-N3DH-CE/01_GT/TRA/man_track.txt",
+        run_checks=False,
+        name="gt",
+    )
 
-gt = load_ctc_data(
-    "/Users/bgallusser/code/traccuracy/downloads/Fluo-N3DH-CE/01_GT/TRA",
-    "/Users/bgallusser/code/traccuracy/downloads/Fluo-N3DH-CE/01_GT/TRA/man_track.txt",
-    name="gt",
-)
-pred = load_ctc_data(
-    "/Users/bgallusser/code/traccuracy/downloads/Fluo-N3DH-CE/01_GT/TRA",
-    "/Users/bgallusser/code/traccuracy/downloads/Fluo-N3DH-CE/01_GT/TRA/man_track.txt",
-    name="gt",
-)
+    img = load_tiff_timeseries(
+        Path("/Users/bgallusser/code/traccuracy/downloads/Fluo-N3DH-CE/01")
+    )
+    img = np.stack(
+        [
+            rescale_intensity(_x, pmin=1, pmax=99.8, clip=False, subsample=16)
+            for _x in tqdm(img, desc="Rescale intensity")
+        ]
+    )
 
+    matched_path = "3d_matched.pkl"
+    try:
+        ctc_matched = pickle.load(open(matched_path, "rb"))
+    except FileNotFoundError:
+        ctc_results, ctc_matched = run_metrics(
+            gt_data=gt,
+            pred_data=pred,
+            matcher=CTCMatcher(),
+            metrics=[CTCMetrics()],
+        )
+        pp.pprint(ctc_results)
+        pickle.dump(ctc_matched, open(matched_path, "wb"))
 
-img = load_tiff_timeseries(
-    Path("/Users/bgallusser/code/traccuracy/downloads/Fluo-N3DH-CE/01")
-)
+    gt_graph = ctc_matched.gt_graph
+    pred_graph = ctc_matched.pred_graph
+    # networkx graph at traccuracy.TrackingGraph.graph
 
-
-ctc_results, ctc_matched = run_metrics(
-    gt_data=gt,
-    pred_data=pred,
-    matcher=CTCMatcher(),
-    metrics=[CTCMetrics()],
-)
-pp.pprint(ctc_results)
-
-gt_graph = ctc_matched.gt_graph
-pred_graph = ctc_matched.pred_graph
-# networkx graph at traccuracy.TrackingGraph.graph
-
-gt_tracks, gt_tracks_graph, gt_properties = graph_to_napari_tracks(
-    gt_graph.graph,
-    properties=["t"],
-)
+    gt_tracks, gt_tracks_graph, gt_properties = graph_to_napari_tracks(
+        gt_graph.graph,
+        properties=["t"],
+    )
 
 v = napari.current_viewer()
 if v is not None:
     v.close()
 v = napari.Viewer()
+for layer in v.layers:
+    v.layers.remove(layer)
 # v.window._qt_window.showFullScreen()
 
-v.theme = "light"
+v.theme = "dark"
 
-scale = (1, 1, 1, 1)  # TODO remove hardcoded params
+scale = (1, 5, 1, 1)  # TODO remove hardcoded params
 image_layer, labels_layer, _, gt_tracks_layer, gt_tracks_data = visualize_gt(
     v,
     img,
@@ -129,6 +143,9 @@ v.camera.perspective = 27
 # )
 
 
+image_layer.affine.translate = [0, -scale[1] * img.shape[1] / 2 + scale[1], 0, 0]
+
+
 # Update clipping plane based on time (axis 0)
 def update_clipping_plane(event=None):
     t = v.dims.point[0]
@@ -140,19 +157,20 @@ def update_clipping_plane(event=None):
             "enabled": False,
         },
         {
-            "position": (t * 10, 0, 0),
+            "position": ((t + 1) * 10, 0, 0),
             "normal": (-1, 0, 0),
             "enabled": True,
         },
     ]
-    image_layer.affine.translate[1] = t * 10
-    # labels_layer.experimental_clipping_planes = clipping_planes_img
     gt_tracks_layer.experimental_clipping_planes = clipping_planes_tracks
-    # gt_tracks_layer.affine.translate[1] = t * 10
-    # for name, layer in errors_layer.items():
-    # layer.experimental_clipping_planes = clipping_planes
 
 
-# Connect event
+def update_translate(event=None):
+    t = v.dims.point[0]
+    gt_tracks_layer.translate = [0, -10 * (t + 1), 0, 0]
+
+
+# Connect events
 v.dims.events.point.connect(update_clipping_plane)
+v.dims.events.point.connect(update_translate)
 v.dims.set_current_step(0, image_layer.data.shape[0])
