@@ -1,10 +1,11 @@
 import logging
 from pathlib import Path
+
+import networkx as nx
 import numpy as np
 import tifffile
-from tqdm import tqdm
 from skimage.util import img_as_ubyte
-import networkx as nx
+from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +113,7 @@ def rescale_intensity(
     subsample : int
         If subsample > 1, use a fraction for percentile calculation (faster).
 
-    Returns
+    Returns:
     -------
     image: np.ndarray
         float32

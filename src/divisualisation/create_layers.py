@@ -1,45 +1,13 @@
-import traccuracy
-from traccuracy import EdgeFlag
-
-import os
-import pprint
-import urllib.request
-import zipfile
-
-from tqdm import tqdm
-
-from traccuracy import run_metrics
-from traccuracy.loaders import load_ctc_data
-from traccuracy.matchers import CTCMatcher, IOUMatcher
-from traccuracy.metrics import CTCMetrics, DivisionMetrics
-
-import sys
-import yaml
 import logging
-from pathlib import Path
+from copy import deepcopy
+
 import napari
-from napari.utils.colormaps import label_colormap
+import numpy as np
+import traccuracy
 from napari.utils.colormaps.colormap_utils import vispy_or_mpl_colormap
-from utils import (
-    crop_borders,
-    rescale_intensity,
-    str2bool,
-    str2path,
-    load_tiff_timeseries,
-    graph_to_napari_tracks,
-)
 
 # from trackastra.tracking import load_ctc_graph, graph_to_napari_tracks
-from tifffile import imread
-import skimage
-import numpy as np
-from tqdm import tqdm
-import networkx as nx
-import matplotlib.pyplot as plt
-import vispy
-import pandas as pd
-from copy import deepcopy
-from napari_animation import Animation
+from traccuracy import EdgeFlag
 
 # from visualize_2d_tracking_errors import visualize_edge_errors
 
@@ -91,7 +59,7 @@ def visualize_gt(
         # depiction="plane",
         # contrast_limits=[0.0, 0.4],
     )
-    mc_broadcast = np.broadcast_to(mc[None, ...], (len(mc),) + mc.shape)
+    np.broadcast_to(mc[None, ...], (len(mc), *mc.shape))
     # labels_layer = v.add_labels(
     #     # np.expand_dims(mc, 0),
     #     mc_broadcast,
@@ -126,7 +94,7 @@ def visualize_gt(
     #     lin_perm.astype(float) / max(lin_perm.max(), 1)
     # )
 
-    track_ids = np.array(tracks[:, 0])
+    np.array(tracks[:, 0])
     # properties["track_id_normalized"] = 0.3 + 0.7 * (track_ids / track_ids.max())
     # properties["lineage_normalized"] = lin.astype(float) / lin.max()
 
