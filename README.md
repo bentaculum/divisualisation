@@ -2,6 +2,11 @@
 
 ### Installation
 
-### Usage
+- Install napari
+- Install this repo
+    ```
+    pip install git+https://github.com/bentaculum/divisualisation.git
+    ```
 
-TODO example usage
+### Usage
+Run `example_2d.py` or `example_3d.py` in ipy

@@ -233,8 +233,7 @@ def graph_to_napari_tracks(
         for c in nodes:
             node = graph.nodes[c]
             t = node["t"]
-            # TODO replace hardcoded node attrs
-            coord = (node["z"] + 10 * node["t"], node["y"], node["x"])
+            coord = (node["z"], node["y"], node["x"])
             tracks.append([label, t, *list(coord)])
 
             for p in properties:
