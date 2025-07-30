@@ -1,5 +1,6 @@
 /src/divisualisation/_version.py
 
+*.mp4
 *.pkl
 .vscode
 # Byte-compiled / optimized / DLL files

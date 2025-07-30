@@ -5,6 +5,7 @@ import networkx as nx
 import numpy as np
 import traccuracy
 from napari.utils.colormaps.colormap_utils import vispy_or_mpl_colormap
+from napari_animation import Animation
 from traccuracy import EdgeFlag
 
 from .utils import graph_to_napari_tracks
@@ -213,3 +214,20 @@ class Divisualisation:
         viewer.dims.ndisplay = 3
 
         return viewer
+
+    def render(self, viewer: napari.Viewer, name="divisualisation", steps=60):
+        # TODO extend
+        a = Animation(viewer)
+        viewer.dims.set_current_step(0, 0)
+        a.capture_keyframe(steps)
+
+        viewer.dims.set_current_step(0, viewer.dims.nsteps[0] - 1)
+        a.capture_keyframe(steps)
+        a.capture_keyframe(steps)
+        print("Saving animation")
+        a.animate(
+            filename=f"{name}.mp4",
+            canvas_only=True,
+            quality=5,
+            fps=12,
+        )

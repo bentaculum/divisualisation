@@ -80,3 +80,5 @@ v = divis.visualize_edge_errors(
 v.dims.set_current_step(0, 190)
 v.camera.angles = (27.919484296382873, -49.86671510905139, -35.8190766165135)
 v.camera.perspective = 27
+
+divis.render(v, name="divisualisation_2d")
