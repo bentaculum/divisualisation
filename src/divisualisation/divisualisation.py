@@ -21,7 +21,6 @@ class Divisualisation:
     ):
         self.time_scale = time_scale
         self.z_scale = z_scale
-        # TODO adapt for 2D. Fake 3rd dimension that does not do anything
         self.scale = (self.time_scale, self.z_scale, 1, 1)
         self.tracks_width = tracks_width
 
@@ -33,28 +32,32 @@ class Divisualisation:
         graph: nx.DiGraph,
         time_attr: str = "t",
     ):
+        # Pseudo 3rd dimension for 2d datasets
+        if x.ndim == 3:
+            x = np.expand_dims(x, 1)
+        if masks.ndim == 3:
+            masks = np.expand_dims(masks, 1)
+
+        # Pseudo-3D for tracks is set in here
         tracks, _, properties = graph_to_napari_tracks(
             graph,
             properties=[time_attr],
         )
 
-        # TODO figure out broadcasting for 2D case
-        # xc_broadcast = np.broadcast_to(xc[None, ...], (len(xc),) + xc.shape)
+        # TODO might need adjustment
         translate_to_tracks = [
             0,
-            -self.z_scale * (x.shape[1] / 2) + self.z_scale,
+            -self.z_scale * (x.shape[1] // 2) + self.z_scale,
             0,
             0,
         ]
 
         v.add_image(
-            # np.expand_dims(xc, 0),
             x,
             scale=(1, self.z_scale, 1, 1),
             colormap="gray",
             rendering="mip",
             translate=translate_to_tracks,
-            # depiction="plane",
         )
 
         v.add_labels(
@@ -65,7 +68,6 @@ class Divisualisation:
             rendering="translucent",
             translate=translate_to_tracks,
             opacity=0.2,
-            # depiction="plane",
         )
 
         properties["gt"] = np.ones_like(properties[time_attr]) * 0.5
@@ -100,13 +102,13 @@ class Divisualisation:
                     "enabled": False,
                 },
                 {
-                    "position": ((t + 1) * self.time_scale, 0, 0),
+                    "position": (t * self.time_scale, 0, 0),
                     "normal": (-1, 0, 0),
                     "enabled": True,
                 },
             ]
             tracks_layer.experimental_clipping_planes = clipping_planes_tracks
-            tracks_layer.translate = [0, -self.time_scale * (t + 1), 0, 0]
+            tracks_layer.translate = [0, -self.time_scale * t, 0, 0]
 
         v.dims.events.point.connect(update_gt_state)
         v.dims.ndisplay = 3
@@ -151,17 +153,13 @@ class Divisualisation:
                 edge_id += 1  # avoid edge id 0
                 u = graph.nodes[u_id]
                 v = graph.nodes[v_id]
-                # Get positions of the edge endpoints
-                # c_u = np.argwhere(reference_masks[u["t"]] == u["segmentation_id"]).mean(
-                # axis=0
-                # )
-                edge_error_tracks.append([edge_id, u["t"], u["z"], u["y"], u["x"]])
+
+                uz = u["z"] if "z" in u else 1
+                edge_error_tracks.append([edge_id, u["t"], uz, u["y"], u["x"]])
                 edge_error_props["error_type"].append(i)
 
-                # c_v = np.argwhere(reference_masks[v["t"]] == v["segmentation_id"]).mean(
-                # axis=0
-                # )
-                edge_error_tracks.append([edge_id, v["t"], v["z"], v["y"], v["x"]])
+                vz = v["z"] if "z" in v else 1
+                edge_error_tracks.append([edge_id, v["t"], vz, v["y"], v["x"]])
                 edge_error_props["error_type"].append(i)
 
             edge_error_props = {k: np.array(v) for k, v in edge_error_props.items()}
@@ -202,14 +200,14 @@ class Divisualisation:
                     "enabled": False,
                 },
                 {
-                    "position": ((t + 1) * self.time_scale, 0, 0),
+                    "position": (t * self.time_scale, 0, 0),
                     "normal": (-1, 0, 0),
                     "enabled": True,
                 },
             ]
             for error, layer in errors_layer.items():
                 layer.experimental_clipping_planes = clipping_planes_tracks
-                layer.translate = [0, -self.time_scale * (t + 1), 0, 0]
+                layer.translate = [0, -self.time_scale * t, 0, 0]
 
         viewer.dims.events.point.connect(update_errors_state)
         viewer.dims.ndisplay = 3

@@ -232,8 +232,11 @@ def graph_to_napari_tracks(
 
         for c in nodes:
             node = graph.nodes[c]
+            # TODO expose attribute names on graph
             t = node["t"]
-            coord = (node["z"], node["y"], node["x"])
+            # Pseudo-3D: z is not used, but can be set to 1
+            z = node["z"] if "z" in node else 1
+            coord = (z, node["y"], node["x"])
             tracks.append([label, t, *list(coord)])
 
             for p in properties:
