@@ -13,6 +13,44 @@ from .utils import graph_to_napari_tracks
 logger = logging.getLogger(__name__)
 
 
+def _animate_with_gl_context(
+    animation: Animation,
+    viewer: napari.Viewer,
+    filename: str,
+    fps: int = 12,
+    quality: int = 5,
+):
+    """Render animation frames with explicit GL context management.
+
+    napari_animation's default animate() loop can lose the OpenGL context
+    between frames (especially under Wayland/XWayland), causing
+    "Attempt to retrieve context when no valid context" errors.
+
+    This function renders frames manually, ensuring the GL context is
+    current and Qt events are processed before each screenshot.
+    """
+    import imageio
+    from qtpy.QtWidgets import QApplication
+    from tqdm import tqdm
+
+    canvas = viewer.window._qt_viewer.canvas
+    n_frames = len(animation._frames)
+
+    writer = imageio.get_writer(filename, fps=fps, quality=quality)
+
+    try:
+        print("Rendering frames...")
+        for state in tqdm(animation._frames, total=n_frames):
+            state.apply(viewer)
+            QApplication.processEvents()
+            canvas.set_current()
+            QApplication.processEvents()
+            frame = canvas.render()
+            writer.append_data(frame)
+    finally:
+        writer.close()
+
+
 class Divisualisation:
     def __init__(
         self,
@@ -224,10 +262,6 @@ class Divisualisation:
         viewer.dims.set_current_step(0, viewer.dims.nsteps[0] - 1)
         a.capture_keyframe(steps)
         a.capture_keyframe(steps)
+
         print("Saving animation")
-        a.animate(
-            filename=f"{name}.mp4",
-            canvas_only=True,
-            quality=5,
-            fps=12,
-        )
+        _animate_with_gl_context(a, viewer, f"{name}.mp4")
