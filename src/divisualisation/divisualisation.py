@@ -31,7 +31,7 @@ class Divisualisation:
         x: np.ndarray,
         masks: np.ndarray,
         gt_graph: nx.DiGraph,
-        pred_graph: nx.DiGraph = None,
+        pred_graph: nx.DiGraph | None = None,
         time_attr: str = "t",
     ):
         # Pseudo 3rd dimension for 2d datasets
