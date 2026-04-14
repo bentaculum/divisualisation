@@ -17,7 +17,7 @@ class Divisualisation:
     def __init__(
         self,
         time_scale: int = 10,
-        z_scale: int | None = 1,
+        z_scale: int = 1,
         tracks_width: int = 1,
     ):
         self.time_scale = time_scale
@@ -30,7 +30,8 @@ class Divisualisation:
         v: napari.Viewer,
         x: np.ndarray,
         masks: np.ndarray,
-        graph: nx.DiGraph,
+        gt_graph: nx.DiGraph,
+        pred_graph: nx.DiGraph = None,
         time_attr: str = "t",
     ):
         # Pseudo 3rd dimension for 2d datasets
@@ -40,8 +41,8 @@ class Divisualisation:
             masks = np.expand_dims(masks, 1)
 
         # Pseudo-3D for tracks is set in here
-        tracks, _, properties = graph_to_napari_tracks(
-            graph,
+        gt_tracks, _, properties = graph_to_napari_tracks(
+            gt_graph,
             properties=[time_attr],
         )
 
@@ -63,7 +64,7 @@ class Divisualisation:
 
         v.add_labels(
             masks,
-            name="masks",
+            name="Predicted masks",
             scale=(1, self.z_scale, 1, 1),
             # rendering="iso_categorical",
             rendering="translucent",
@@ -77,12 +78,12 @@ class Divisualisation:
         logger.info("Adding gt tracks")
 
         # Scale tracks z dim by time
-        assert tracks.shape[1] == 5
-        tracks[:, -3] = tracks[:, -3] + self.time_scale * tracks[:, -4]
+        assert gt_tracks.shape[1] == 5
+        gt_tracks[:, -3] = gt_tracks[:, -3] + self.time_scale * gt_tracks[:, -4]
 
-        tracks_layer = v.add_tracks(
-            data=tracks,
-            name="tracks",
+        gt_tracks_layer = v.add_tracks(
+            data=gt_tracks,
+            name="GT tracks",
             properties=properties,
             color_by="gt",
             blending="translucent_no_depth",
@@ -108,10 +109,60 @@ class Divisualisation:
                     "enabled": True,
                 },
             ]
-            tracks_layer.experimental_clipping_planes = clipping_planes_tracks
-            tracks_layer.translate = [0, -self.time_scale * t, 0, 0]
+            gt_tracks_layer.experimental_clipping_planes = clipping_planes_tracks
+            gt_tracks_layer.translate = [0, -self.time_scale * t, 0, 0]
 
         v.dims.events.point.connect(update_gt_state)
+
+        if pred_graph is not None:
+            pred_tracks, _, pred_properties = graph_to_napari_tracks(
+                pred_graph,
+                properties=[time_attr],
+            )
+            pred_properties["pred"] = np.ones_like(pred_properties[time_attr]) * 0.5
+            pred_properties = {"pred": pred_properties["pred"]}
+            logger.info("Adding pred tracks")
+
+            # Scale tracks z dim by time
+            assert pred_tracks.shape[1] == 5
+            pred_tracks[:, -3] = (
+                pred_tracks[:, -3] + self.time_scale * pred_tracks[:, -4]
+            )
+
+            pred_tracks_layer = v.add_tracks(
+                data=pred_tracks,
+                name="Predicted tracks",
+                properties=pred_properties,
+                color_by="pred",
+                blending="translucent_no_depth",
+                colormaps_dict={
+                    "pred": vispy_or_mpl_colormap("Wistia"),
+                },
+                tail_width=self.tracks_width,
+                tail_length=1000,
+                opacity=1.0,
+                visible=False,
+            )
+
+            def update_pred_state(event=None):
+                t = v.dims.point[0]
+                clipping_planes_tracks = [
+                    {
+                        "position": (0, 0, 0),
+                        "normal": (0, 0, 0),
+                        "enabled": False,
+                    },
+                    {
+                        "position": (t * self.time_scale, 0, 0),
+                        "normal": (-1, 0, 0),
+                        "enabled": True,
+                    },
+                ]
+                pred_tracks_layer.experimental_clipping_planes = clipping_planes_tracks
+                pred_tracks_layer.translate = [0, -self.time_scale * t, 0, 0]
+
+            v.dims.events.point.connect(update_pred_state)
+
         v.dims.ndisplay = 3
         # v.dims.set_current_step(0, img_layer.data.shape[0])
         v.camera.center = (
