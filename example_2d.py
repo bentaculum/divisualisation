@@ -66,7 +66,8 @@ v = divis.visualize_gt(
     x=img,
     masks=pred.segmentation,
     # networkx graph at traccuracy.TrackingGraph.graph
-    graph=gt_graph.graph,
+    gt_graph=gt_graph.graph,
+    pred_graph=pred_graph.graph,
 )
 
 v = divis.visualize_edge_errors(
