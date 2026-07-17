@@ -1,0 +1,13 @@
+name: divisualisation
+display_name: Divisualisation
+# use 'hidden' to remove plugin from napari hub search results
+visibility: public
+categories: ["Visualization"]
+contributions:
+  commands:
+    - id: divisualisation.error_toggle
+      python_name: divisualisation._widget:ErrorToggleWidget
+      title: Toggle edge-error layers
+  widgets:
+    - command: divisualisation.error_toggle
+      display_name: Edge error toggle
