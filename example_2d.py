@@ -58,6 +58,7 @@ viewer.theme = "dark"
 viewer.add_image(img, name="raw", colormap="gray")
 viewer.add_labels(pred.segmentation, name="predicted masks", opacity=0.3)
 
+# GT and predicted tracks with the same tail settings the app defaults to.
 for graph, name in ((gt_graph, "GT tracks"), (pred_graph, "predicted tracks")):
     tracks, tracks_graph, _ = graph_to_napari_tracks(graph.graph, include_z=False)
     viewer.add_tracks(tracks, graph=tracks_graph, name=name, tail_length=5)

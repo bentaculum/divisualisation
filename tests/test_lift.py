@@ -125,3 +125,53 @@ def test_lift_preserves_real_z_for_3d_tracks():
 
     lift.revert()
     np.testing.assert_allclose(v.layers["tracks"].data[:, 2], [4, 4, 4])
+
+
+def test_role_mapping_applies_and_restores_display():
+    # Declaring layers by role applies each role's "error view" look on lift and
+    # restores the layers' original display settings on revert.
+    from divisualisation.lift import ROLE_DISPLAY
+
+    v = ViewerModel()
+    gt = v.add_tracks(
+        np.array([[1, 0, 5, 5], [1, 1, 6, 6]], float),
+        name="GT tracks",
+        tail_length=7,
+        tail_width=3,
+    )
+    fn = v.add_tracks(
+        np.array([[2, 0, 1, 1], [2, 1, 2, 2]], float),
+        name="is_ctc_fn",
+        tail_length=9,
+        tail_width=1,
+    )
+    orig = {ly.name: (ly.tail_length, ly.tail_width, ly.color_by) for ly in (gt, fn)}
+
+    lift = SpacetimeLift(v, time_scale=10)
+    lift.apply({"gt": "GT tracks", "fn_edges": "is_ctc_fn", "pred": "", "fp_edges": ""})
+
+    # Common "error view" look on both; error role gets the doubled tail width.
+    assert gt.tail_length == 1000 and fn.tail_length == 1000
+    assert gt.tail_width == 2  # gt width_factor 1 * base 2
+    assert fn.tail_width == 2 * ROLE_DISPLAY["fn_edges"]["width_factor"]  # 4
+    assert gt.color_by == "_lift_gt" and fn.color_by == "_lift_fn_edges"
+
+    lift.revert()
+    for layer in (v.layers["GT tracks"], v.layers["is_ctc_fn"]):
+        tl, tw, cb = orig[layer.name]
+        assert layer.tail_length == tl
+        assert layer.tail_width == tw
+        assert layer.color_by == cb
+        assert layer.data.shape[1] == 4
+
+
+def test_missing_roles_are_skipped():
+    # All roles optional: a role pointing at no layer (blank) is simply skipped.
+    v = ViewerModel()
+    v.add_tracks(np.array([[1, 0, 5, 5], [1, 1, 6, 6]], float), name="GT tracks")
+    lift = SpacetimeLift(v, time_scale=8)
+    # Only gt is declared; pred/fn/fp are blank.
+    lift.apply({"gt": "GT tracks", "pred": "", "fn_edges": "", "fp_edges": ""})
+    assert v.layers["GT tracks"].data.shape[1] == 5
+    lift.revert()
+    assert v.layers["GT tracks"].data.shape[1] == 4

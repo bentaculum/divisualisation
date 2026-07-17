@@ -12,6 +12,7 @@ import logging
 
 import napari
 import numpy as np
+from napari.utils.colormaps.colormap_utils import vispy_or_mpl_colormap
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,27 @@ def _clipping_planes(cut_at: float):
         {"position": (0, 0, 0), "normal": (0, 0, 0), "enabled": False},
         {"position": (cut_at, 0, 0), "normal": (-1, 0, 0), "enabled": True},
     ]
+
+
+# The four track roles the lift understands and the "error view" look each one
+# takes on toggle-on (all reverted on toggle-off). Matches the original
+# Divisualisation renderer: GT -> Greens, predicted -> Wistia, edge errors ->
+# cool with a doubled tail width. ``colormap`` is a matplotlib/vispy name.
+ROLES = ("gt", "pred", "fn_edges", "fp_edges")
+ROLE_DISPLAY: dict[str, dict] = {
+    "gt": {"colormap": "Greens", "width_factor": 1},
+    "pred": {"colormap": "Wistia", "width_factor": 1},
+    "fn_edges": {"colormap": "cool", "width_factor": 2},
+    "fp_edges": {"colormap": "cool", "width_factor": 2},
+}
+# Shared look applied to every lifted track layer regardless of role.
+_COMMON_DISPLAY = {
+    "tail_length": 1000,
+    "blending": "translucent_no_depth",
+    "opacity": 1.0,
+}
+# Base tail width; error roles get ``width_factor`` x this.
+_BASE_TAIL_WIDTH = 2
 
 
 class SpacetimeLift:
@@ -57,21 +79,34 @@ class SpacetimeLift:
             self._refold_tracks()
             self._update_sweep()
 
-    def apply(self, track_layer_names):
-        """Lift the named tracks layers; sweep-clip image/labels; go 3D.
+    def apply(self, layer_roles):
+        """Lift the declared track layers; sweep-clip image/labels; go 3D.
+
+        Args:
+            layer_roles: Either a mapping ``{role: layer_name}`` (role is one of
+                ``ROLES``) or a plain iterable of layer names. A mapping also
+                applies each role's "error view" display look (colormap, tail
+                length/width, blending, opacity), snapshotting and restoring the
+                layers' prior display settings. All roles are optional; unknown
+                or missing layer names are skipped.
 
         Idempotent: calling apply while already applied is a no-op.
         """
         if self._applied:
             return
-        track_layer_names = set(track_layer_names)
+        # Normalize to {layer_name: role|None}.
+        if isinstance(layer_roles, dict):
+            name_to_role = {name: role for role, name in layer_roles.items() if name}
+        else:
+            name_to_role = {name: None for name in layer_roles}
 
         for layer in self._viewer.layers:
             self._snapshots[layer.name] = self._snapshot_layer(layer)
 
         for layer in self._viewer.layers:
-            if layer.name in track_layer_names and _is_tracks(layer):
+            if layer.name in name_to_role and _is_tracks(layer):
                 self._lift_tracks_layer(layer)
+                self._apply_display(layer, name_to_role[layer.name])
             else:
                 self._expand_to_volume(layer)
 
@@ -111,7 +146,7 @@ class SpacetimeLift:
 
     @staticmethod
     def _snapshot_layer(layer) -> dict:
-        return {
+        snap = {
             "data": copy.deepcopy(layer.data),
             "scale": tuple(layer.scale),
             "translate": tuple(layer.translate),
@@ -119,13 +154,63 @@ class SpacetimeLift:
                 p.dict() for p in layer.experimental_clipping_planes
             ]),
         }
+        # Display settings only exist on Tracks layers; snapshot them so the
+        # "error view" look can be fully reverted on toggle-off.
+        if _is_tracks(layer):
+            snap["display"] = {
+                "colormaps_dict": dict(layer.colormaps_dict),
+                "color_by": layer.color_by,
+                "properties": {k: v.copy() for k, v in layer.properties.items()},
+                "tail_length": layer.tail_length,
+                "tail_width": layer.tail_width,
+                "blending": layer.blending,
+                "opacity": layer.opacity,
+            }
+        return snap
 
     @staticmethod
     def _restore_layer(layer, snap: dict):
+        display = snap.get("display")
+        if display is not None:
+            # Restore properties/colormap before color_by so the key exists.
+            layer.properties = display["properties"]
+            layer.colormaps_dict = display["colormaps_dict"]
+            if display["color_by"] in layer.properties or not layer.properties:
+                layer.color_by = display["color_by"]
+            layer.tail_length = display["tail_length"]
+            layer.tail_width = display["tail_width"]
+            layer.blending = display["blending"]
+            layer.opacity = display["opacity"]
         layer.data = snap["data"]
         layer.scale = snap["scale"]
         layer.translate = snap["translate"]
         layer.experimental_clipping_planes = snap["clipping_planes"]
+
+    def _apply_display(self, layer, role):
+        """Give a lifted track layer the "error view" look for its role.
+
+        role is None for layers lifted without a declared role (geometry only,
+        no display change). Prior display settings are already snapshotted.
+        """
+        if role is None:
+            return
+        spec = ROLE_DISPLAY.get(role)
+        if spec is None:
+            return
+        for key, value in _COMMON_DISPLAY.items():
+            setattr(layer, key, value)
+        layer.tail_width = _BASE_TAIL_WIDTH * spec["width_factor"]
+        # Flat single-color look: constant property driving the role colormap.
+        key = f"_lift_{role}"
+        layer.properties = {
+            **dict(layer.properties),
+            key: np.full(len(layer.data), 0.5),
+        }
+        layer.colormaps_dict = {
+            **dict(layer.colormaps_dict),
+            key: vispy_or_mpl_colormap(spec["colormap"]),
+        }
+        layer.color_by = key
 
     # --- transforms ---------------------------------------------------------
 

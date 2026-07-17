@@ -72,21 +72,27 @@ def test_spacetime_widget_toggles_lift(make_napari_viewer):
     viewer = make_napari_viewer()
     viewer.add_image(np.random.rand(4, 8, 8), name="img")
     viewer.add_tracks(
-        np.array([[1, 0, 2, 3], [1, 1, 2, 3], [1, 2, 2, 3]], float), name="tracks"
+        np.array([[1, 0, 2, 3], [1, 1, 2, 3], [1, 2, 2, 3]], float),
+        name="GT tracks",
+        tail_length=5,
     )
 
     widget = SpacetimeWidget(viewer)
-    # "tracks" is a Tracks layer, selected by default.
-    assert "tracks" in widget._layers.choices
-    assert list(widget._layers.value) == ["tracks"]
+    # The GT role dropdown is name-guessed to the "GT tracks" layer.
+    assert widget._role_combos["gt"].value == "GT tracks"
 
     widget._lift_amount.value = 15
     widget._enabled.value = True
-    tracks = viewer.layers["tracks"].data
-    assert tracks.shape[1] == 5
-    np.testing.assert_allclose(tracks[:, 2], 15 * tracks[:, 1])
+    layer = viewer.layers["GT tracks"]
+    assert layer.data.shape[1] == 5
+    np.testing.assert_allclose(layer.data[:, 2], 15 * layer.data[:, 1])
     assert viewer.dims.ndisplay == 3
+    # GT role look applied on toggle-on.
+    assert layer.tail_length == 1000
 
     widget._enabled.value = False
-    assert viewer.layers["tracks"].data.shape[1] == 4
+    layer = viewer.layers["GT tracks"]
+    assert layer.data.shape[1] == 4
     assert viewer.dims.ndisplay == 2
+    # Original display settings restored on toggle-off.
+    assert layer.tail_length == 5

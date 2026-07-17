@@ -110,10 +110,12 @@ def test_color_by_and_default_colormaps(viewer_model, graphs_2d):
     layers = add_edge_error_tracks(viewer_model, gt, pred)
     fn = layers[EdgeFlag.CTC_FALSE_NEG]
     assert fn.color_by == "error"
-    # Each error type gets its own distinct colormap keyed on the "error" prop.
+    # Both error types default to "cool", matching the original renderer (they
+    # are told apart by being separate named layers, not by color).
     fn_cmap = fn.colormaps_dict["error"].name
     fp_cmap = layers[EdgeFlag.CTC_FALSE_POS].colormaps_dict["error"].name
-    assert fn_cmap != fp_cmap
+    assert fn_cmap == "cool"
+    assert fp_cmap == "cool"
 
 
 def test_colormaps_override(viewer_model, graphs_2d):

@@ -37,11 +37,12 @@ DEFAULT_ERROR_GRAPHS: dict[EdgeFlag, str] = {
     EdgeFlag.CTC_FALSE_POS: "pred",
 }
 
-# Distinct colormaps per error type so false negatives and false positives are
-# easy to tell apart when both are overlaid (the spacetime renderer uses a
-# single "cool" map for both, since there it relies on layer separation).
+# Colormap per error type. Matches the original Divisualisation renderer, which
+# uses a single "cool" map for both error types and relies on them being
+# separate named layers (not color) to tell false negatives from false
+# positives.
 DEFAULT_ERROR_COLORMAPS: dict[EdgeFlag, str] = {
-    EdgeFlag.CTC_FALSE_NEG: "spring",
+    EdgeFlag.CTC_FALSE_NEG: "cool",
     EdgeFlag.CTC_FALSE_POS: "cool",
 }
 
@@ -206,7 +207,9 @@ def add_edge_error_tracks(
             properties=properties,
             colormaps_dict={_PROPERTY_KEY: vispy_or_mpl_colormap(colormaps[flag])},
             tail_width=tail_width,
-            tail_length=1,  # 2-point tracklets: one edge, no history to tail
+            # Long tail so the whole error segment stays drawn, matching the
+            # original Divisualisation renderer.
+            tail_length=1000,
             head_length=1,
             blending="translucent_no_depth",
             opacity=1.0,
