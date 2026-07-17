@@ -199,8 +199,19 @@ def linear_chains(G: nx.DiGraph):
 def graph_to_napari_tracks(
     graph: nx.DiGraph,
     properties: list[str] = [],
+    include_z: bool = True,
 ):
-    """Convert a track graph to napari tracks."""
+    """Convert a track graph to napari tracks.
+
+    Args:
+        graph: Track graph with node attributes ``t``, ``y``, ``x`` and
+            optionally ``z``.
+        properties: Node attribute names to carry over as track properties.
+        include_z: If ``True`` (default), emit 5-column ``[id, t, z, y, x]``
+            tracks, using ``z=1`` as a pseudo dimension for 2D nodes. If
+            ``False``, emit 4-column ``[id, t, y, x]`` tracks, which is what
+            genuinely 2D data needs (no dummy ``z``).
+    """
     # each tracklet is a linear chain in the graph
     chains = tuple(linear_chains(graph))
 
@@ -234,9 +245,12 @@ def graph_to_napari_tracks(
             node = graph.nodes[c]
             # TODO expose attribute names on graph
             t = node["t"]
-            # Pseudo-3D: z is not used, but can be set to 1
-            z = node["z"] if "z" in node else 1
-            coord = (z, node["y"], node["x"])
+            if include_z:
+                # Pseudo-3D: z is not used for 2D data, but can be set to 1
+                z = node["z"] if "z" in node else 1
+                coord = (z, node["y"], node["x"])
+            else:
+                coord = (node["y"], node["x"])
             tracks.append([label, t, *list(coord)])
 
             for p in properties:
