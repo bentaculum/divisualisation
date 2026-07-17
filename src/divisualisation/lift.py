@@ -104,6 +104,10 @@ class SpacetimeLift:
         else:
             name_to_role = {name: None for name in layer_roles}
 
+        # Capture the current timepoint BEFORE mutating: lifting layer data
+        # resets it, and we want the slider to stay put across the toggle.
+        current_time = self._viewer.dims.current_step[0]
+
         for layer in self._viewer.layers:
             self._snapshots[layer.name] = self._snapshot_layer(layer)
 
@@ -128,13 +132,18 @@ class SpacetimeLift:
             "ndisplay": self._viewer.dims.ndisplay,
             "camera_center": tuple(self._viewer.camera.center),
             "camera_zoom": self._viewer.camera.zoom,
+            "current_time": current_time,
         }
         self._viewer.dims.ndisplay = 3
         self._viewer.dims.events.point.connect(self._update_sweep)
         self._applied = True
-        self._update_sweep()
         # Frame the camera on the new 3D extent so the lifted cone is visible.
         self._viewer.reset_view()
+        # Restore the timepoint (reset_view / data changes reset it); this also
+        # drives _update_sweep to the right slice via the point event. Set only
+        # the time axis, since ndim grew from 3 to 4.
+        self._viewer.dims.set_current_step(0, current_time)
+        self._update_sweep()
 
     def revert(self):
         """Restore every layer and the viewer to their pre-apply state."""
@@ -142,6 +151,9 @@ class SpacetimeLift:
             return
         # Disconnect before restoring so the callback cannot fire mid-revert.
         self._viewer.dims.events.point.disconnect(self._update_sweep)
+
+        # Keep the slider where it is across the toggle (restoring data resets it).
+        current_time = self._viewer.dims.current_step[0]
 
         for layer in self._viewer.layers:
             snap = self._snapshots.get(layer.name)
@@ -151,6 +163,7 @@ class SpacetimeLift:
         self._viewer.dims.ndisplay = self._viewer_snapshot["ndisplay"]
         self._viewer.camera.center = self._viewer_snapshot["camera_center"]
         self._viewer.camera.zoom = self._viewer_snapshot["camera_zoom"]
+        self._viewer.dims.set_current_step(0, current_time)
         self._applied = False
         self._snapshots.clear()
         self._track_bases.clear()
