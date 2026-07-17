@@ -16,6 +16,7 @@ from napari.utils.colormaps.colormap_utils import vispy_or_mpl_colormap
 from napari_animation import Animation
 from traccuracy import EdgeFlag
 
+from .lift import _clipping_planes
 from .utils import graph_to_napari_tracks
 
 logger = logging.getLogger(__name__)
@@ -145,18 +146,7 @@ class Divisualisation:
 
         def update_gt_state(event=None):
             t = v.dims.point[0]
-            clipping_planes_tracks = [
-                {
-                    "position": (0, 0, 0),
-                    "normal": (0, 0, 0),
-                    "enabled": False,
-                },
-                {
-                    "position": (t * self.time_scale, 0, 0),
-                    "normal": (-1, 0, 0),
-                    "enabled": True,
-                },
-            ]
+            clipping_planes_tracks = _clipping_planes(t * self.time_scale)
             gt_tracks_layer.experimental_clipping_planes = clipping_planes_tracks
             gt_tracks_layer.translate = [0, -self.time_scale * t, 0, 0]
 
@@ -194,18 +184,7 @@ class Divisualisation:
 
             def update_pred_state(event=None):
                 t = v.dims.point[0]
-                clipping_planes_tracks = [
-                    {
-                        "position": (0, 0, 0),
-                        "normal": (0, 0, 0),
-                        "enabled": False,
-                    },
-                    {
-                        "position": (t * self.time_scale, 0, 0),
-                        "normal": (-1, 0, 0),
-                        "enabled": True,
-                    },
-                ]
+                clipping_planes_tracks = _clipping_planes(t * self.time_scale)
                 pred_tracks_layer.experimental_clipping_planes = clipping_planes_tracks
                 pred_tracks_layer.translate = [0, -self.time_scale * t, 0, 0]
 
@@ -292,18 +271,7 @@ class Divisualisation:
 
         def update_errors_state(event=None):
             t = viewer.dims.point[0]
-            clipping_planes_tracks = [
-                {
-                    "position": (0, 0, 0),
-                    "normal": (0, 0, 0),
-                    "enabled": False,
-                },
-                {
-                    "position": (t * self.time_scale, 0, 0),
-                    "normal": (-1, 0, 0),
-                    "enabled": True,
-                },
-            ]
+            clipping_planes_tracks = _clipping_planes(t * self.time_scale)
             for error, layer in errors_layer.items():
                 layer.experimental_clipping_planes = clipping_planes_tracks
                 layer.translate = [0, -self.time_scale * t, 0, 0]
