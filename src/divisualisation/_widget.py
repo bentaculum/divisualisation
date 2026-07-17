@@ -30,7 +30,7 @@ class LiftAllTracksWidget(Container):
         self._lift = SpacetimeLift(viewer)
 
         self._enabled = CheckBox(value=False, text="Spacetime lift")
-        self._lift_amount = FloatSlider(value=12, min=0, max=40, label="lift")
+        self._lift_amount = FloatSlider(value=12, min=0, max=99, label="lift")
         self._enabled.changed.connect(self._on_toggle)
         self._lift_amount.changed.connect(self._on_lift_amount)
         self.extend([self._enabled, self._lift_amount])
@@ -84,7 +84,7 @@ class ErrorsWidget(Container):
         self._lift = SpacetimeLift(viewer)
 
         self._enabled = CheckBox(value=False, text="Spacetime lift")
-        self._lift_amount = FloatSlider(value=12, min=0, max=40, label="lift")
+        self._lift_amount = FloatSlider(value=12, min=0, max=99, label="lift")
         self._role_combos = {
             role: ComboBox(label=_ROLE_LABELS[role], choices=[_NONE_CHOICE])
             for role in ROLES
