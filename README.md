@@ -62,8 +62,15 @@ Divisualisation also ships two optional napari dock widgets (**Plugins → Divis
   cone; turn it off to restore the flat 2D view exactly. This is the original
   `Divisualisation` render effect, made interactive and reversible.
 
-#### Rendering: the 3D spacetime animation
+#### Examples
 
-Run `example_2d.py` or `example_3d.py` in ipython to render the spacetime mp4
-animations shown above. These use the `Divisualisation` class, which folds time
-into the `z` axis and drives a scripted animation render.
+Run `example_2d.py` (bacteria) or `example_3d.py` (C. elegans nuclei) in ipython.
+Each loads its data into a napari viewer with the tracks and edge-error overlays
+and docks the plugin widgets, so you can toggle the spacetime lift and play the
+time slider yourself.
+
+#### Rendering an animation
+
+To render the spacetime mp4 animations shown above, use the `Divisualisation`
+class directly (`visualize_gt` / `visualize_edge_errors` / `render`), which folds
+time into the `z` axis and drives a scripted keyframe render.
