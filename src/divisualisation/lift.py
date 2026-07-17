@@ -133,18 +133,20 @@ class SpacetimeLift:
         """Fold time into z for one tracks layer, matching the original render."""
         data = np.asarray(layer.data, dtype=float)
         if data.shape[1] == 4:
-            # [id, t, y, x] -> [id, t, z=0, y, x]
+            # 2D + t: [id, t, y, x] -> [id, t, z=0, y, x]. The inserted z is 0,
+            # so lifting invents a z purely from time.
             base = np.insert(data, 2, 0.0, axis=1)
         else:
+            # 3D + t: keep the real z; lifting adds the time offset on top of it.
             base = data.copy()
-            base[:, 2] = 0.0
         self._track_bases[layer.name] = base
         layer.data = self._folded(base)
 
     def _folded(self, base: np.ndarray) -> np.ndarray:
         data = base.copy()
-        # z <- time_scale * t, so tracks rise out of the plane over time.
-        data[:, 2] = self._time_scale * data[:, 1]
+        # z <- z + time_scale * t, so tracks rise out of the plane over time
+        # while preserving any real z (matches the original Divisualisation).
+        data[:, 2] = base[:, 2] + self._time_scale * base[:, 1]
         return data
 
     def _refold_tracks(self):

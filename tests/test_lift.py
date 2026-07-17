@@ -106,3 +106,22 @@ def test_sweep_callback_updates_on_time_change(viewer_with_layers):
     # so the t=2 slice stays visible.
     enabled = [p for p in planes if p.enabled]
     assert enabled and enabled[0].position[0] == pytest.approx(30)
+
+
+def test_lift_preserves_real_z_for_3d_tracks():
+    # 3D tracks already have a real z; lifting adds the time offset on top of it
+    # (matching the original Divisualisation: z = z_real + time_scale * t).
+    v = ViewerModel()
+    v.add_image(np.random.rand(3, 2, 8, 8), name="vol")  # t, z, y, x
+    v.add_tracks(
+        np.array([[1, 0, 4.0, 5, 5], [1, 1, 4.0, 6, 6], [1, 2, 4.0, 7, 7]], float),
+        name="tracks",
+    )
+    lift = SpacetimeLift(v, time_scale=5)
+    lift.apply(["tracks"])
+    # z_real=4, time_scale=5 -> [4, 9, 14]
+    np.testing.assert_allclose(v.layers["tracks"].data[:, 2], [4, 9, 14])
+    assert v.layers["tracks"].data.shape[1] == 5  # stays 5-col
+
+    lift.revert()
+    np.testing.assert_allclose(v.layers["tracks"].data[:, 2], [4, 4, 4])
