@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 
 import networkx as nx
@@ -198,7 +199,7 @@ def linear_chains(G: nx.DiGraph):
 
 def graph_to_napari_tracks(
     graph: nx.DiGraph,
-    properties: list[str] = [],
+    properties: Sequence[str] = (),
     include_z: bool = True,
 ):
     """Convert a track graph to napari tracks.

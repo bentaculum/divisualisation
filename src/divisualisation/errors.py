@@ -7,16 +7,26 @@ get edge-error track layers added on top, without a dummy ``z`` dimension for
 2D data.
 """
 
+from __future__ import annotations
+
 import logging
 from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING
 
 import napari
 import numpy as np
-from napari.layers import Tracks
 from napari.utils.colormaps.colormap_utils import vispy_or_mpl_colormap
 from traccuracy import EdgeFlag, TrackingGraph
 
+if TYPE_CHECKING:
+    # Only needed for type hints; importing napari.layers eagerly would pull in
+    # Qt, which the functional API does not otherwise require.
+    from napari.layers import Tracks
+
 logger = logging.getLogger(__name__)
+
+# napari Tracks layer property used to drive the per-error-type colormap.
+_PROPERTY_KEY = "error"
 
 # CTC false negatives are missing edges, so their coordinates live in the
 # ground-truth graph. CTC false positives are spurious predicted edges, so
@@ -108,6 +118,11 @@ def add_edge_error_tracks(
     already in the viewer (e.g. points / labels / tracks from motile-tracker),
     and get napari's built-in eye-icon visibility toggles for free.
 
+    Both graphs are accepted so a single call can draw both error types. Only
+    the graph a requested flag reads from is actually used, so to visualize just
+    one error type you may pass an empty graph for the other (and set ``ndim``
+    explicitly if that leaves no non-empty graph to auto-detect from).
+
     Args:
         viewer: An existing napari viewer to add layers to.
         gt_graph: Matched ground-truth tracking graph (source of false negatives).
@@ -142,7 +157,13 @@ def add_edge_error_tracks(
                 f"Unsupported error flag {flag!r}. Supported flags: "
                 f"{list(DEFAULT_ERROR_GRAPHS)}."
             )
-        flag_graphs[flag] = graphs[graph_key]
+        graph = graphs.get(graph_key)
+        if graph is None:
+            raise ValueError(
+                f"Flag {flag!r} maps to unknown graph key {graph_key!r}; "
+                "DEFAULT_ERROR_GRAPHS and the gt/pred arguments are out of sync."
+            )
+        flag_graphs[flag] = graph
 
     if ndim is None:
         # Detect from the graphs we actually read (a graph the user does not
@@ -176,14 +197,16 @@ def add_edge_error_tracks(
             layers[flag] = None
             continue
 
-        properties = {"error": np.full(len(tracks), 0.5)}
+        # A constant mid-colormap value renders every segment in one flat color
+        # from the chosen colormap.
+        properties = {_PROPERTY_KEY: np.full(len(tracks), 0.5)}
         layer = viewer.add_tracks(
             data=tracks,
             name=str(flag.value),
             properties=properties,
-            colormaps_dict={"error": vispy_or_mpl_colormap(colormaps[flag])},
+            colormaps_dict={_PROPERTY_KEY: vispy_or_mpl_colormap(colormaps[flag])},
             tail_width=tail_width,
-            tail_length=1,
+            tail_length=1,  # 2-point tracklets: one edge, no history to tail
             head_length=1,
             blending="translucent_no_depth",
             opacity=1.0,
@@ -192,7 +215,7 @@ def add_edge_error_tracks(
         )
         # Set color_by after construction to avoid a transient napari warning
         # about the feature not being present yet during __init__.
-        layer.color_by = "error"
+        layer.color_by = _PROPERTY_KEY
         layers[flag] = layer
 
     return layers
