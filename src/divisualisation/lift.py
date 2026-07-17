@@ -181,7 +181,10 @@ class SpacetimeLift:
             layer.tail_width = display["tail_width"]
             layer.blending = display["blending"]
             layer.opacity = display["opacity"]
-        layer.data = snap["data"]
+        if _is_labels(layer):
+            _set_labels_data(layer, snap["data"])
+        else:
+            layer.data = snap["data"]
         layer.scale = snap["scale"]
         layer.translate = snap["translate"]
         layer.experimental_clipping_planes = snap["clipping_planes"]
@@ -240,10 +243,26 @@ class SpacetimeLift:
 
     @staticmethod
     def _expand_to_volume(layer):
-        """Give a 2D+t image/labels layer a singleton z so it shares the 3D dims."""
+        """Give a 2D+t image/labels layer a singleton z so it shares the 3D dims.
+
+        The new z axis is inserted into scale/translate too, so the layer's
+        transform stays consistent with the expanded (t, z, y, x) data.
+        """
         data = layer.data
-        if getattr(data, "ndim", 0) == 3:
+        if getattr(data, "ndim", 0) != 3:
+            return
+        scale = list(layer.scale)
+        translate = list(layer.translate)
+        if _is_labels(layer):
+            _set_labels_data(layer, np.expand_dims(data, 1))
+        else:
             layer.data = np.expand_dims(data, 1)
+        # Insert the z entry after time (index 1). Growing the data reset the
+        # transforms to 4D defaults; overwrite with the intended values.
+        scale.insert(1, 1.0)
+        translate.insert(1, 0.0)
+        layer.scale = scale
+        layer.translate = translate
 
     def _update_sweep(self, event=None):
         """Move the clipping plane / lifted-track translate to the current time."""
@@ -262,3 +281,22 @@ class SpacetimeLift:
 
 def _is_tracks(layer) -> bool:
     return type(layer).__name__ == "Tracks"
+
+
+def _is_labels(layer) -> bool:
+    return type(layer).__name__ == "Labels"
+
+
+def _set_labels_data(layer, data: np.ndarray) -> None:
+    """Set a Labels layer's data, bypassing a napari ndim-change bug.
+
+    napari's ``Labels.data`` setter pre-sets ``_ndim`` to the new value before
+    ``_update_dims()``, so a 3D<->4D change is not reflected in the layer's
+    transforms and the vispy render path hits a matmul shape error. Setting
+    ``_data`` directly keeps ``_ndim`` at the old value until ``_update_dims``
+    runs, so the transforms grow/shrink correctly.
+    """
+    layer._data = layer._ensure_int_labels(data)
+    layer._update_dims()
+    layer.events.data(value=layer.data)
+    layer._reset_editable()

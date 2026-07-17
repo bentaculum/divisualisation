@@ -64,10 +64,43 @@ def test_new_error_layer_added_after_widget_respects_toggle(
     assert not viewer.layers[fn_name].visible
 
 
-def test_spacetime_widget_toggles_lift(make_napari_viewer):
+def test_spacetime_widget_visualize_mode_keeps_coloring(make_napari_viewer):
     import numpy as np
 
-    from divisualisation._widget import SpacetimeWidget
+    from divisualisation._widget import _MODE_TRACKS, SpacetimeWidget
+
+    viewer = make_napari_viewer()
+    viewer.add_image(np.random.rand(4, 8, 8), name="img")
+    viewer.add_tracks(
+        np.array([[1, 0, 2, 3], [1, 1, 2, 3], [1, 2, 2, 3]], float),
+        name="tracks",
+        tail_length=5,
+    )
+
+    widget = SpacetimeWidget(viewer)
+    assert widget._mode.value == _MODE_TRACKS  # default workflow
+    widget._viz_tracks.value = "tracks"
+
+    widget._lift_amount.value = 15
+    widget._enabled.value = True
+    layer = viewer.layers["tracks"]
+    assert layer.data.shape[1] == 5
+    np.testing.assert_allclose(layer.data[:, 2], 15 * layer.data[:, 1])
+    assert viewer.dims.ndisplay == 3
+    # Visualize mode keeps the layer's own coloring / tail (no error-view look).
+    assert layer.color_by == "track_id"
+    assert layer.tail_length == 5
+
+    widget._enabled.value = False
+    layer = viewer.layers["tracks"]
+    assert layer.data.shape[1] == 4
+    assert viewer.dims.ndisplay == 2
+
+
+def test_spacetime_widget_errors_mode_applies_role_look(make_napari_viewer):
+    import numpy as np
+
+    from divisualisation._widget import _MODE_ERRORS, SpacetimeWidget
 
     viewer = make_napari_viewer()
     viewer.add_image(np.random.rand(4, 8, 8), name="img")
@@ -78,6 +111,7 @@ def test_spacetime_widget_toggles_lift(make_napari_viewer):
     )
 
     widget = SpacetimeWidget(viewer)
+    widget._mode.value = _MODE_ERRORS
     # The GT role dropdown is name-guessed to the "GT tracks" layer.
     assert widget._role_combos["gt"].value == "GT tracks"
 
@@ -85,14 +119,17 @@ def test_spacetime_widget_toggles_lift(make_napari_viewer):
     widget._enabled.value = True
     layer = viewer.layers["GT tracks"]
     assert layer.data.shape[1] == 5
-    np.testing.assert_allclose(layer.data[:, 2], 15 * layer.data[:, 1])
     assert viewer.dims.ndisplay == 3
-    # GT role look applied on toggle-on.
+    # Error-view role look applied on toggle-on.
     assert layer.tail_length == 1000
+    assert layer.color_by == "_lift_gt"
 
     widget._enabled.value = False
     layer = viewer.layers["GT tracks"]
     assert layer.data.shape[1] == 4
     assert viewer.dims.ndisplay == 2
+    # Original settings restored.
+    assert layer.tail_length == 5
+    assert layer.color_by == "track_id"
     # Original display settings restored on toggle-off.
     assert layer.tail_length == 5

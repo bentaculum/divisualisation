@@ -222,3 +222,65 @@ def add_edge_error_tracks(
         layers[flag] = layer
 
     return layers
+
+
+def compute_edge_errors_from_layers(
+    viewer,
+    gt_tracks,
+    gt_labels,
+    pred_tracks,
+    pred_labels,
+    seg_id_key="segmentation_id",
+    **kwargs,
+):
+    """Compute CTC edge errors from napari layers and overlay them.
+
+    Runs traccuracy CTC matching on the GT and prediction tracks (using their
+    segmentation label layers), then adds the false-negative / false-positive
+    edge overlays via :func:`add_edge_error_tracks`. Use this when the errors
+    are not already present in the viewer.
+
+    Each tracks layer must carry a per-detection segmentation label id in its
+    ``properties[seg_id_key]`` that matches the label values in the paired
+    labels layer.
+
+    Args:
+        viewer: The napari viewer to add error layers to.
+        gt_tracks: Ground-truth napari Tracks layer.
+        gt_labels: Ground-truth napari Labels layer (segmentation).
+        pred_tracks: Prediction napari Tracks layer.
+        pred_labels: Prediction napari Labels layer (segmentation).
+        seg_id_key: Key in each tracks layer's ``properties`` holding the
+            detection's segmentation label id. Defaults to "segmentation_id".
+        **kwargs: Forwarded to :func:`add_edge_error_tracks`.
+
+    Returns:
+        The dict returned by :func:`add_edge_error_tracks`.
+    """
+    # Imported lazily so the module has no hard traccuracy-loader / heavy deps
+    # at import time.
+    from traccuracy import run_metrics
+    from traccuracy.loaders import load_napari_data
+    from traccuracy.matchers import CTCMatcher
+    from traccuracy.metrics import CTCMetrics
+
+    def to_graph(tracks, labels, name):
+        props = {seg_id_key: np.asarray(tracks.properties[seg_id_key])}
+        return load_napari_data(
+            np.asarray(tracks.data),
+            graph=tracks.graph,
+            properties=props,
+            segmentation=np.asarray(labels.data),
+            seg_id_key=seg_id_key,
+            name=name,
+        )
+
+    gt_graph = to_graph(gt_tracks, gt_labels, "gt")
+    pred_graph = to_graph(pred_tracks, pred_labels, "pred")
+    _, matched = run_metrics(
+        gt_data=gt_graph,
+        pred_data=pred_graph,
+        matcher=CTCMatcher(),
+        metrics=[CTCMetrics()],
+    )
+    return add_edge_error_tracks(viewer, matched.gt_graph, matched.pred_graph, **kwargs)
