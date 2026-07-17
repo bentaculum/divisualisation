@@ -8,6 +8,11 @@ contributions:
     - id: divisualisation.error_toggle
       python_name: divisualisation._widget:ErrorToggleWidget
       title: Toggle edge-error layers
+    - id: divisualisation.spacetime
+      python_name: divisualisation._widget:SpacetimeWidget
+      title: Spacetime lift
   widgets:
     - command: divisualisation.error_toggle
       display_name: Edge error toggle
+    - command: divisualisation.spacetime
+      display_name: Spacetime lift
