@@ -5,14 +5,14 @@ visibility: public
 categories: ["Visualization"]
 contributions:
   commands:
-    - id: divisualisation.error_toggle
-      python_name: divisualisation._widget:ErrorToggleWidget
-      title: Toggle edge-error layers
-    - id: divisualisation.spacetime
-      python_name: divisualisation._widget:SpacetimeWidget
-      title: Spacetime lift
+    - id: divisualisation.visualize_tracks
+      python_name: divisualisation._widget:VisualizeTracksWidget
+      title: Visualize tracks
+    - id: divisualisation.errors
+      python_name: divisualisation._widget:ErrorsWidget
+      title: GT / pred errors
   widgets:
-    - command: divisualisation.error_toggle
-      display_name: Edge error toggle
-    - command: divisualisation.spacetime
-      display_name: Spacetime lift
+    - command: divisualisation.visualize_tracks
+      display_name: Visualize tracks
+    - command: divisualisation.errors
+      display_name: GT / pred errors

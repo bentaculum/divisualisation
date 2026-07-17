@@ -8,10 +8,8 @@ runs in CI on Linux with a virtual display (``xvfb-run``).
 import os
 import sys
 
+import numpy as np
 import pytest
-from traccuracy import EdgeFlag
-
-from divisualisation import add_edge_error_tracks
 
 # pytest-qt installs as the module "pytestqt" (no underscore); the wrong name
 # here would silently skip the test even when pytest-qt is available.
@@ -24,83 +22,57 @@ if sys.platform == "darwin" and os.environ.get("QT_QPA_PLATFORM") == "offscreen"
     )
 
 
-def test_toggle_hides_and_shows_error_layers(make_napari_viewer, graphs_2d):
-    from divisualisation._widget import ErrorToggleWidget
-
-    viewer = make_napari_viewer()
-    gt, pred = graphs_2d
-    add_edge_error_tracks(viewer, gt, pred)
-
-    widget = ErrorToggleWidget(viewer)
-    fn_name = str(EdgeFlag.CTC_FALSE_NEG.value)
-    fp_name = str(EdgeFlag.CTC_FALSE_POS.value)
-
-    assert viewer.layers[fn_name].visible
-    assert viewer.layers[fp_name].visible
-
-    widget._show_errors.value = False
-    assert not viewer.layers[fn_name].visible
-    assert not viewer.layers[fp_name].visible
-
-    widget._show_errors.value = True
-    assert viewer.layers[fn_name].visible
-    assert viewer.layers[fp_name].visible
-
-
-def test_new_error_layer_added_after_widget_respects_toggle(
-    make_napari_viewer, graphs_2d
-):
-    from divisualisation._widget import ErrorToggleWidget
-
-    viewer = make_napari_viewer()
-    widget = ErrorToggleWidget(viewer)
-    widget._show_errors.value = False
-
-    gt, pred = graphs_2d
-    add_edge_error_tracks(viewer, gt, pred)
-
-    # Layers added after the toggle was turned off must come in hidden.
-    fn_name = str(EdgeFlag.CTC_FALSE_NEG.value)
-    assert not viewer.layers[fn_name].visible
-
-
-def test_spacetime_widget_visualize_mode_keeps_coloring(make_napari_viewer):
-    import numpy as np
-
-    from divisualisation._widget import _MODE_TRACKS, SpacetimeWidget
+def test_visualize_widget_lifts_all_tracks(make_napari_viewer):
+    from divisualisation._widget import VisualizeTracksWidget
 
     viewer = make_napari_viewer()
     viewer.add_image(np.random.rand(4, 8, 8), name="img")
-    viewer.add_tracks(
-        np.array([[1, 0, 2, 3], [1, 1, 2, 3], [1, 2, 2, 3]], float),
-        name="tracks",
-        tail_length=5,
-    )
+    for name in ("tracks a", "tracks b"):
+        viewer.add_tracks(
+            np.array([[1, 0, 2, 3], [1, 1, 2, 3], [1, 2, 2, 3]], float),
+            name=name,
+            tail_length=5,
+        )
 
-    widget = SpacetimeWidget(viewer)
-    assert widget._mode.value == _MODE_TRACKS  # default workflow
-    widget._viz_tracks.value = "tracks"
-
+    widget = VisualizeTracksWidget(viewer)
     widget._lift_amount.value = 15
     widget._enabled.value = True
-    layer = viewer.layers["tracks"]
-    assert layer.data.shape[1] == 5
-    np.testing.assert_allclose(layer.data[:, 2], 15 * layer.data[:, 1])
+
+    # Both tracks layers lifted, keeping their own coloring (no error-view look).
+    for name in ("tracks a", "tracks b"):
+        layer = viewer.layers[name]
+        assert layer.data.shape[1] == 5
+        np.testing.assert_allclose(layer.data[:, 2], 15 * layer.data[:, 1])
+        assert layer.color_by == "track_id"
+        assert layer.tail_length == 5
     assert viewer.dims.ndisplay == 3
-    # Visualize mode keeps the layer's own coloring / tail (no error-view look).
-    assert layer.color_by == "track_id"
-    assert layer.tail_length == 5
 
     widget._enabled.value = False
-    layer = viewer.layers["tracks"]
-    assert layer.data.shape[1] == 4
+    for name in ("tracks a", "tracks b"):
+        assert viewer.layers[name].data.shape[1] == 4
     assert viewer.dims.ndisplay == 2
 
 
-def test_spacetime_widget_errors_mode_applies_role_look(make_napari_viewer):
-    import numpy as np
+def test_visualize_widget_sync_matches_main(make_napari_viewer):
+    from divisualisation._widget import VisualizeTracksWidget
 
-    from divisualisation._widget import _MODE_ERRORS, SpacetimeWidget
+    viewer = make_napari_viewer()
+    viewer.add_image(np.zeros((5, 8, 8)), name="img")
+    viewer.add_tracks(np.array([[1, t, 4, 4] for t in range(5)], float), name="tracks")
+    widget = VisualizeTracksWidget(viewer)
+    widget._lift_amount.value = 10
+    widget._enabled.value = True
+
+    layer = viewer.layers["tracks"]
+    viewer.dims.set_current_step(0, 3)
+    # Verbatim main coupling: clip at t*scale=30, translate -t*scale=-30.
+    enabled = [p for p in layer.experimental_clipping_planes if p.enabled]
+    assert enabled and enabled[0].position[0] == pytest.approx(30)
+    assert list(layer.translate) == pytest.approx([0, -30, 0, 0])
+
+
+def test_errors_widget_applies_role_look(make_napari_viewer):
+    from divisualisation._widget import ErrorsWidget
 
     viewer = make_napari_viewer()
     viewer.add_image(np.random.rand(4, 8, 8), name="img")
@@ -110,26 +82,20 @@ def test_spacetime_widget_errors_mode_applies_role_look(make_napari_viewer):
         tail_length=5,
     )
 
-    widget = SpacetimeWidget(viewer)
-    widget._mode.value = _MODE_ERRORS
-    # The GT role dropdown is name-guessed to the "GT tracks" layer.
-    assert widget._role_combos["gt"].value == "GT tracks"
+    widget = ErrorsWidget(viewer)
+    assert widget._role_combos["gt"].value == "GT tracks"  # name-guessed
 
     widget._lift_amount.value = 15
     widget._enabled.value = True
     layer = viewer.layers["GT tracks"]
     assert layer.data.shape[1] == 5
     assert viewer.dims.ndisplay == 3
-    # Error-view role look applied on toggle-on.
-    assert layer.tail_length == 1000
+    assert layer.tail_length == 1000  # error-view look
     assert layer.color_by == "_lift_gt"
 
     widget._enabled.value = False
     layer = viewer.layers["GT tracks"]
     assert layer.data.shape[1] == 4
     assert viewer.dims.ndisplay == 2
-    # Original settings restored.
-    assert layer.tail_length == 5
+    assert layer.tail_length == 5  # restored
     assert layer.color_by == "track_id"
-    # Original display settings restored on toggle-off.
-    assert layer.tail_length == 5

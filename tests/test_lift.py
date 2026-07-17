@@ -103,12 +103,10 @@ def test_sweep_callback_updates_on_time_change(viewer_with_layers):
     v.dims.set_current_step(0, 2)  # scrub to t=2, time_scale=10
     layer = v.layers["tracks"]
     planes = layer.experimental_clipping_planes
-    # Translate lands the current slice on the image plane (-t*scale = -20);
-    # the clip sits one step ahead ((t+1)*scale = 30) so the current slice is
-    # not cut off. This is the coupling of the original working renderer.
+    # Verbatim main coupling: clip at t*time_scale=20, translate -t*scale=-20.
     enabled = [p for p in planes if p.enabled]
-    assert enabled and enabled[0].position[0] == pytest.approx(30)
-    assert layer.translate[-3] == pytest.approx(-20)
+    assert enabled and enabled[0].position[0] == pytest.approx(20)
+    assert list(layer.translate) == pytest.approx([0, -20, 0, 0])
 
 
 def test_lift_preserves_real_z_for_3d_tracks():

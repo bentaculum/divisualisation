@@ -265,24 +265,29 @@ class SpacetimeLift:
         layer.translate = translate
 
     def _update_sweep(self, event=None):
-        """Sync the lifted tracks to the current timepoint.
+        """Sync each lifted tracks layer to the current timepoint.
 
-        Each lifted tracks layer is translated by ``-t * time_scale`` along z so
-        the current timepoint's slice lands on the (fixed) image plane, and is
-        clipped at ``(t + 1) * time_scale`` so that current slice stays visible
-        (clipping exactly at ``t * time_scale`` would cut the current tracks off
-        at the plane). Image/labels planes are left untouched. This one-step
-        offset is the coupling used by the original working renderer.
+        Verbatim port of the original Divisualisation renderer: clip the tracks
+        at ``t * time_scale`` along the folded-time (z) axis and translate them
+        by ``-t * time_scale`` there, so the current timepoint's slice lands on
+        the fixed image plane and later frames recede above it as you scrub.
+        Image/labels planes are left untouched.
         """
         t = self._viewer.dims.point[0]
-        cut_at = (t + 1) * self._time_scale
-        translate_z = t * self._time_scale
+        clipping_planes = [
+            {"position": (0, 0, 0), "normal": (0, 0, 0), "enabled": False},
+            {
+                "position": (t * self._time_scale, 0, 0),
+                "normal": (-1, 0, 0),
+                "enabled": True,
+            },
+        ]
         for name in self._track_bases:
+            if name not in self._viewer.layers:
+                continue  # layer removed (e.g. viewer teardown); skip
             layer = self._viewer.layers[name]
-            layer.experimental_clipping_planes = _clipping_planes(cut_at)
-            translate = list(layer.translate)
-            translate[-3] = -translate_z
-            layer.translate = translate
+            layer.experimental_clipping_planes = clipping_planes
+            layer.translate = [0, -self._time_scale * t, 0, 0]
 
 
 def _is_tracks(layer) -> bool:

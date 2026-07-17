@@ -78,13 +78,13 @@ for graph, name in ((gt_graph, "GT tracks"), (pred_graph, "predicted tracks")):
         tail_length=5,
     )
 
-# Errors are NOT precomputed: open Plugins -> divisualisation -> Spacetime lift,
-# switch to "GT / pred errors" mode, and click "Compute errors" to add the
+# Errors are NOT precomputed: open Plugins -> divisualisation ->
+# "GT / pred errors" and click "Compute errors" to add the
 # false-negative / false-positive overlays. (Or call add_edge_error_tracks
 # directly, as the flat functional API.)
 
 # Dock the plugin widgets so you can toggle + play interactively.
-viewer.window.add_plugin_dock_widget("divisualisation", "Edge error toggle")
-viewer.window.add_plugin_dock_widget("divisualisation", "Spacetime lift")
+viewer.window.add_plugin_dock_widget("divisualisation", "Visualize tracks")
+viewer.window.add_plugin_dock_widget("divisualisation", "GT / pred errors")
 
 napari.run()
