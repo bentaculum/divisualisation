@@ -46,6 +46,11 @@ _COMMON_DISPLAY = {
 # Base tail width; error roles get ``width_factor`` x this.
 _BASE_TAIL_WIDTH = 2
 
+# Default camera for the first lift: a near-orthogonal 3D view of the image
+# plane, taken from the original example_2d on main.
+_DEFAULT_LIFT_ANGLES = (27.919484296382873, -49.86671510905139, -35.8190766165135)
+_DEFAULT_LIFT_PERSPECTIVE = 27
+
 
 class SpacetimeLift:
     """Apply and revert the time->z spacetime lift on an existing viewer.
@@ -64,10 +69,29 @@ class SpacetimeLift:
         # 5-column base tracks (z zeroed) per lifted layer, so changing the lift
         # amount is a cheap recompute from the original time column.
         self._track_bases: dict[str, np.ndarray] = {}
+        # Remembered lifted-view camera, so toggling off then on returns to the
+        # same 3D view. None until the first lift.
+        self._lift_camera: dict | None = None
 
     @property
     def applied(self) -> bool:
         return self._applied
+
+    def _camera_state(self) -> dict:
+        cam = self._viewer.camera
+        return {
+            "center": tuple(cam.center),
+            "zoom": cam.zoom,
+            "angles": tuple(cam.angles),
+            "perspective": cam.perspective,
+        }
+
+    def _set_camera_state(self, state: dict) -> None:
+        cam = self._viewer.camera
+        cam.center = state["center"]
+        cam.zoom = state["zoom"]
+        cam.angles = state["angles"]
+        cam.perspective = state["perspective"]
 
     @property
     def time_scale(self) -> float:
@@ -130,15 +154,20 @@ class SpacetimeLift:
 
         self._viewer_snapshot = {
             "ndisplay": self._viewer.dims.ndisplay,
-            "camera_center": tuple(self._viewer.camera.center),
-            "camera_zoom": self._viewer.camera.zoom,
+            "camera": self._camera_state(),
             "current_time": current_time,
         }
         self._viewer.dims.ndisplay = 3
         self._viewer.dims.events.point.connect(self._update_sweep)
         self._applied = True
-        # Frame the camera on the new 3D extent so the lifted cone is visible.
-        self._viewer.reset_view()
+        if self._lift_camera is not None:
+            # Return to the lifted view the user last had.
+            self._set_camera_state(self._lift_camera)
+        else:
+            # First lift: frame the extent, then take a near-orthogonal 3D angle.
+            self._viewer.reset_view()
+            self._viewer.camera.angles = _DEFAULT_LIFT_ANGLES
+            self._viewer.camera.perspective = _DEFAULT_LIFT_PERSPECTIVE
         # Restore the timepoint (reset_view / data changes reset it); this also
         # drives _update_sweep to the right slice via the point event. Set only
         # the time axis, since ndim grew from 3 to 4.
@@ -160,9 +189,11 @@ class SpacetimeLift:
             if snap is not None:
                 self._restore_layer(layer, snap)
 
+        # Remember where the lifted view was, so toggling back on returns to it.
+        self._lift_camera = self._camera_state()
+
         self._viewer.dims.ndisplay = self._viewer_snapshot["ndisplay"]
-        self._viewer.camera.center = self._viewer_snapshot["camera_center"]
-        self._viewer.camera.zoom = self._viewer_snapshot["camera_zoom"]
+        self._set_camera_state(self._viewer_snapshot["camera"])
         self._viewer.dims.set_current_step(0, current_time)
         self._applied = False
         self._snapshots.clear()
