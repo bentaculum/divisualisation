@@ -52,7 +52,15 @@ attribute). Pass `scale=(y_scale, x_scale)` (spatial only, no leading time
 entry) to align the overlay with your image/labels layers. See
 `example_interactive_2d.py`.
 
-Divisualisation also ships an optional napari dock widget (**Plugins → Divisualisation → Edge error toggle**) that shows/hides all error layers at once.
+Divisualisation also ships two optional napari dock widgets (**Plugins → Divisualisation**):
+
+- **Edge error toggle** — show/hide all error layers at once.
+- **Spacetime lift** — interactively fold time into a `z` axis so the selected
+  tracks layers rise out of the moving image plane into a 3D "spacetime" cone,
+  with a live lift-amount slider. Tick which tracks layers to lift (all by
+  default), turn the toggle on, and scrub the time slider to sweep through the
+  cone; turn it off to restore the flat 2D view exactly. This is the original
+  `Divisualisation` render effect, made interactive and reversible.
 
 #### Rendering: the 3D spacetime animation
 

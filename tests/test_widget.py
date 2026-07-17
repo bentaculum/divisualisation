@@ -62,3 +62,31 @@ def test_new_error_layer_added_after_widget_respects_toggle(
     # Layers added after the toggle was turned off must come in hidden.
     fn_name = str(EdgeFlag.CTC_FALSE_NEG.value)
     assert not viewer.layers[fn_name].visible
+
+
+def test_spacetime_widget_toggles_lift(make_napari_viewer):
+    import numpy as np
+
+    from divisualisation._widget import SpacetimeWidget
+
+    viewer = make_napari_viewer()
+    viewer.add_image(np.random.rand(4, 8, 8), name="img")
+    viewer.add_tracks(
+        np.array([[1, 0, 2, 3], [1, 1, 2, 3], [1, 2, 2, 3]], float), name="tracks"
+    )
+
+    widget = SpacetimeWidget(viewer)
+    # "tracks" is a Tracks layer, selected by default.
+    assert "tracks" in widget._layers.choices
+    assert list(widget._layers.value) == ["tracks"]
+
+    widget._lift_amount.value = 15
+    widget._enabled.value = True
+    tracks = viewer.layers["tracks"].data
+    assert tracks.shape[1] == 5
+    np.testing.assert_allclose(tracks[:, 2], 15 * tracks[:, 1])
+    assert viewer.dims.ndisplay == 3
+
+    widget._enabled.value = False
+    assert viewer.layers["tracks"].data.shape[1] == 4
+    assert viewer.dims.ndisplay == 2
