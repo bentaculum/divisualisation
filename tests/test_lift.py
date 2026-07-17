@@ -101,11 +101,13 @@ def test_sweep_callback_updates_on_time_change(viewer_with_layers):
     lift = SpacetimeLift(v, time_scale=10)
     lift.apply(["tracks"])
     v.dims.set_current_step(0, 2)  # scrub to t=2
-    planes = v.layers["tracks"].experimental_clipping_planes
-    # The sweep clips just past the current frame: (t + 1) * time_scale = 30,
-    # so the t=2 slice stays visible.
+    layer = v.layers["tracks"]
+    planes = layer.experimental_clipping_planes
+    # Clip and translate are locked at t * time_scale = 20 (matches the original
+    # renderer), so the current slice stays aligned with the image plane.
     enabled = [p for p in planes if p.enabled]
-    assert enabled and enabled[0].position[0] == pytest.approx(30)
+    assert enabled and enabled[0].position[0] == pytest.approx(20)
+    assert layer.translate[-3] == pytest.approx(-20)
 
 
 def test_lift_preserves_real_z_for_3d_tracks():

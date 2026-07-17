@@ -265,18 +265,23 @@ class SpacetimeLift:
         layer.translate = translate
 
     def _update_sweep(self, event=None):
-        """Move the clipping plane / lifted-track translate to the current time."""
+        """Sync the lifted tracks to the current timepoint.
+
+        Matches the original Divisualisation renderer: each lifted tracks layer
+        is clipped at ``t * time_scale`` and translated by ``-t * time_scale``
+        along z, so the current timepoint's slice always lands on the (fixed)
+        image plane and past timepoints recede above it as you scrub. The clip
+        and translate use the same ``t * time_scale`` so they stay locked; the
+        image/labels planes are left untouched.
+        """
         t = self._viewer.dims.point[0]
-        # Clip just past the current timepoint so its slice is always visible
-        # (a bare t * time_scale cut hides everything at t=0).
-        cut_at = (t + 1) * self._time_scale
-        translate_z = t * self._time_scale
-        for layer in self._viewer.layers:
+        cut_at = t * self._time_scale
+        for name in self._track_bases:
+            layer = self._viewer.layers[name]
             layer.experimental_clipping_planes = _clipping_planes(cut_at)
-            if layer.name in self._track_bases:
-                translate = list(layer.translate)
-                translate[-3] = -translate_z
-                layer.translate = translate
+            translate = list(layer.translate)
+            translate[-3] = -cut_at
+            layer.translate = translate
 
 
 def _is_tracks(layer) -> bool:
