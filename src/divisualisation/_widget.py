@@ -2,7 +2,7 @@
 
 Two fixed widgets (each additive; the functional API works without them):
 
-- ``VisualizeTracksWidget`` lifts every tracks layer in the viewer into the 3D
+- ``LiftAllTracksWidget`` lifts every tracks layer in the viewer into the 3D
   time->z "spacetime" view, keeping each layer's own coloring, with a live
   lift-amount slider. Toggling off restores the flat 2D view.
 - ``ErrorsWidget`` declares the GT / predicted / FN-edge / FP-edge tracks
@@ -16,7 +16,7 @@ from magicgui.widgets import CheckBox, ComboBox, Container, FloatSlider, PushBut
 from .lift import ROLES, SpacetimeLift, _is_tracks
 
 
-class VisualizeTracksWidget(Container):
+class LiftAllTracksWidget(Container):
     """Lift all tracks layers into the spacetime view, keeping their coloring.
 
     A single lift-amount slider drives every tracks layer in the viewer; the
@@ -41,8 +41,8 @@ class VisualizeTracksWidget(Container):
     def _on_toggle(self, *_):
         if self._enabled.value:
             self._lift.time_scale = self._lift_amount.value
-            # Lift every tracks layer, keeping each layer's own coloring.
-            self._lift.apply(self._all_tracks_layer_names())
+            # Lift every tracks layer, coloring them all green (like main's GT).
+            self._lift.apply(self._all_tracks_layer_names(), default_colormap="Greens")
         else:
             self._lift.revert()
 

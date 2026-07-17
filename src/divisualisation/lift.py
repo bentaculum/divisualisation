@@ -9,6 +9,7 @@ restored exactly on revert, so it can be toggled on and off from the GUI.
 
 import copy
 import logging
+from contextlib import contextmanager
 
 import napari
 import numpy as np
@@ -79,16 +80,19 @@ class SpacetimeLift:
             self._refold_tracks()
             self._update_sweep()
 
-    def apply(self, layer_roles):
+    def apply(self, layer_roles, default_colormap=None):
         """Lift the declared track layers; sweep-clip image/labels; go 3D.
 
         Args:
             layer_roles: Either a mapping ``{role: layer_name}`` (role is one of
-                ``ROLES``) or a plain iterable of layer names. A mapping also
-                applies each role's "error view" display look (colormap, tail
-                length/width, blending, opacity), snapshotting and restoring the
-                layers' prior display settings. All roles are optional; unknown
-                or missing layer names are skipped.
+                ``ROLES``) or a plain iterable of layer names. A mapping applies
+                each role's "error view" display look; a plain iterable applies
+                ``default_colormap`` (if given) to every listed tracks layer.
+                Prior display settings are snapshotted and restored on revert.
+                All roles are optional; unknown or missing names are skipped.
+            default_colormap: Colormap name applied to every lifted tracks layer
+                when ``layer_roles`` is a plain iterable (e.g. "Greens"). Ignored
+                for the role-mapping form.
 
         Idempotent: calling apply while already applied is a no-op.
         """
@@ -103,12 +107,22 @@ class SpacetimeLift:
         for layer in self._viewer.layers:
             self._snapshots[layer.name] = self._snapshot_layer(layer)
 
-        for layer in self._viewer.layers:
-            if layer.name in name_to_role and _is_tracks(layer):
-                self._lift_tracks_layer(layer)
-                self._apply_display(layer, name_to_role[layer.name])
-            else:
-                self._expand_to_volume(layer)
+        # Mutate all layers to a consistent ndim before any render, so napari
+        # never draws a mix of 3-ndim and 4-ndim layers (which raises an
+        # IndexError on the not-yet-lifted layer's extent).
+        with self._block_layer_events():
+            for layer in self._viewer.layers:
+                if layer.name in name_to_role and _is_tracks(layer):
+                    self._lift_tracks_layer(layer)
+                    role = name_to_role[layer.name]
+                    if role is not None:
+                        self._apply_display(layer, role)
+                    elif default_colormap is not None:
+                        self._apply_colormap(
+                            layer, default_colormap, f"_lift_{layer.name}"
+                        )
+                else:
+                    self._expand_to_volume(layer)
 
         self._viewer_snapshot = {
             "ndisplay": self._viewer.dims.ndisplay,
@@ -157,6 +171,7 @@ class SpacetimeLift:
         # Display settings only exist on Tracks layers; snapshot them so the
         # "error view" look can be fully reverted on toggle-off.
         if _is_tracks(layer):
+            snap["graph"] = dict(layer.graph)
             snap["display"] = {
                 "colormaps_dict": dict(layer.colormaps_dict),
                 "color_by": layer.color_by,
@@ -185,35 +200,53 @@ class SpacetimeLift:
             _set_labels_data(layer, snap["data"])
         else:
             layer.data = snap["data"]
+            if "graph" in snap:
+                layer.graph = snap["graph"]
         layer.scale = snap["scale"]
         layer.translate = snap["translate"]
         layer.experimental_clipping_planes = snap["clipping_planes"]
 
-    def _apply_display(self, layer, role):
-        """Give a lifted track layer the "error view" look for its role.
-
-        role is None for layers lifted without a declared role (geometry only,
-        no display change). Prior display settings are already snapshotted.
+    @contextmanager
+    def _block_layer_events(self):
+        """Block every layer's events so the ndim swap does not trigger a render
+        until all layers are consistently 4D.
         """
-        if role is None:
-            return
-        spec = ROLE_DISPLAY.get(role)
-        if spec is None:
-            return
-        for key, value in _COMMON_DISPLAY.items():
-            setattr(layer, key, value)
-        layer.tail_width = _BASE_TAIL_WIDTH * spec["width_factor"]
-        # Flat single-color look: constant property driving the role colormap.
-        key = f"_lift_{role}"
+        blockers = [layer.events.blocker() for layer in self._viewer.layers]
+        for b in blockers:
+            b.__enter__()
+        try:
+            yield
+        finally:
+            for b in blockers:
+                b.__exit__(None, None, None)
+
+    @staticmethod
+    def _apply_colormap(layer, colormap, key):
+        """Color a tracks layer flat with ``colormap`` via a constant property
+        stored under ``key`` (unique per layer so overlaid layers don't clash).
+        """
         layer.properties = {
             **dict(layer.properties),
             key: np.full(len(layer.data), 0.5),
         }
         layer.colormaps_dict = {
             **dict(layer.colormaps_dict),
-            key: vispy_or_mpl_colormap(spec["colormap"]),
+            key: vispy_or_mpl_colormap(colormap),
         }
         layer.color_by = key
+
+    def _apply_display(self, layer, role):
+        """Give a lifted track layer the "error view" look for its role.
+
+        Prior display settings are already snapshotted.
+        """
+        spec = ROLE_DISPLAY.get(role)
+        if spec is None:
+            return
+        for key, value in _COMMON_DISPLAY.items():
+            setattr(layer, key, value)
+        layer.tail_width = _BASE_TAIL_WIDTH * spec["width_factor"]
+        self._apply_colormap(layer, spec["colormap"], f"_lift_{role}")
 
     # --- transforms ---------------------------------------------------------
 
@@ -228,7 +261,11 @@ class SpacetimeLift:
             # 3D + t: keep the real z; lifting adds the time offset on top of it.
             base = data.copy()
         self._track_bases[layer.name] = base
+        # Reassigning .data resets the layer's division graph; restore it so the
+        # division/lineage edges keep drawing (lifted with the node coordinates).
+        graph = dict(layer.graph)
         layer.data = self._folded(base)
+        layer.graph = graph
 
     def _folded(self, base: np.ndarray) -> np.ndarray:
         data = base.copy()
@@ -239,7 +276,10 @@ class SpacetimeLift:
 
     def _refold_tracks(self):
         for name, base in self._track_bases.items():
-            self._viewer.layers[name].data = self._folded(base)
+            layer = self._viewer.layers[name]
+            graph = dict(layer.graph)
+            layer.data = self._folded(base)
+            layer.graph = graph
 
     @staticmethod
     def _expand_to_volume(layer):

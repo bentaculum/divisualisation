@@ -22,8 +22,8 @@ if sys.platform == "darwin" and os.environ.get("QT_QPA_PLATFORM") == "offscreen"
     )
 
 
-def test_visualize_widget_lifts_all_tracks(make_napari_viewer):
-    from divisualisation._widget import VisualizeTracksWidget
+def test_lift_all_widget_lifts_all_tracks(make_napari_viewer):
+    from divisualisation._widget import LiftAllTracksWidget
 
     viewer = make_napari_viewer()
     viewer.add_image(np.random.rand(4, 8, 8), name="img")
@@ -34,7 +34,7 @@ def test_visualize_widget_lifts_all_tracks(make_napari_viewer):
             tail_length=5,
         )
 
-    widget = VisualizeTracksWidget(viewer)
+    widget = LiftAllTracksWidget(viewer)
     widget._lift_amount.value = 15
     widget._enabled.value = True
 
@@ -43,23 +43,23 @@ def test_visualize_widget_lifts_all_tracks(make_napari_viewer):
         layer = viewer.layers[name]
         assert layer.data.shape[1] == 5
         np.testing.assert_allclose(layer.data[:, 2], 15 * layer.data[:, 1])
-        assert layer.color_by == "track_id"
-        assert layer.tail_length == 5
+        assert layer.color_by.startswith("_lift_")
     assert viewer.dims.ndisplay == 3
 
     widget._enabled.value = False
     for name in ("tracks a", "tracks b"):
         assert viewer.layers[name].data.shape[1] == 4
+        assert viewer.layers[name].color_by == "track_id"  # restored
     assert viewer.dims.ndisplay == 2
 
 
-def test_visualize_widget_sync_matches_main(make_napari_viewer):
-    from divisualisation._widget import VisualizeTracksWidget
+def test_lift_all_widget_sync_matches_main(make_napari_viewer):
+    from divisualisation._widget import LiftAllTracksWidget
 
     viewer = make_napari_viewer()
     viewer.add_image(np.zeros((5, 8, 8)), name="img")
     viewer.add_tracks(np.array([[1, t, 4, 4] for t in range(5)], float), name="tracks")
-    widget = VisualizeTracksWidget(viewer)
+    widget = LiftAllTracksWidget(viewer)
     widget._lift_amount.value = 10
     widget._enabled.value = True
 

@@ -120,7 +120,7 @@ for graph, name in ((gt_graph, "GT tracks"), (pred_graph, "predicted tracks")):
 add_edge_error_tracks(viewer, gt_graph, pred_graph, tail_width=4)
 
 # Dock the plugin widgets so you can toggle + play interactively.
-viewer.window.add_plugin_dock_widget("divisualisation", "Visualize tracks")
+viewer.window.add_plugin_dock_widget("divisualisation", "Lift all tracks")
 viewer.window.add_plugin_dock_widget("divisualisation", "GT / pred errors")
 
 napari.run()

@@ -5,14 +5,14 @@ visibility: public
 categories: ["Visualization"]
 contributions:
   commands:
-    - id: divisualisation.visualize_tracks
-      python_name: divisualisation._widget:VisualizeTracksWidget
-      title: Visualize tracks
+    - id: divisualisation.lift_all_tracks
+      python_name: divisualisation._widget:LiftAllTracksWidget
+      title: Lift all tracks
     - id: divisualisation.errors
       python_name: divisualisation._widget:ErrorsWidget
       title: GT / pred errors
   widgets:
-    - command: divisualisation.visualize_tracks
-      display_name: Visualize tracks
+    - command: divisualisation.lift_all_tracks
+      display_name: Lift all tracks
     - command: divisualisation.errors
       display_name: GT / pred errors
