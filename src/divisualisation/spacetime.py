@@ -41,7 +41,9 @@ def _animate_with_gl_context(
     from qtpy.QtWidgets import QApplication
     from tqdm import tqdm
 
-    canvas = viewer.window._qt_viewer.canvas
+    # napari's VispyCanvas wrapper delegates GL-context and rendering to the
+    # underlying vispy scene canvas; reach through to it for set_current/render.
+    scene_canvas = viewer.window._qt_viewer.canvas._scene_canvas
     n_frames = len(animation._frames)
 
     writer = imageio.get_writer(filename, fps=fps, quality=quality)
@@ -51,9 +53,9 @@ def _animate_with_gl_context(
         for state in tqdm(animation._frames, total=n_frames):
             state.apply(viewer)
             QApplication.processEvents()
-            canvas.set_current()
+            scene_canvas.set_current()
             QApplication.processEvents()
-            frame = canvas.render()
+            frame = scene_canvas.render()
             writer.append_data(frame)
     finally:
         writer.close()
