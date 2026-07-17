@@ -235,9 +235,15 @@ class SpacetimeLift:
 
     @staticmethod
     def _apply_colormap(layer, colormap, key):
-        """Color a tracks layer flat with ``colormap`` via a constant property
-        stored under ``key`` (unique per layer so overlaid layers don't clash).
+        """Give a lifted track layer the spacetime look: the shared display
+        settings from the original renderer (tail_length, blending, opacity) and
+        a flat ``colormap`` via a constant property stored under ``key`` (unique
+        per layer so overlaid layers don't clash). Prior settings are already
+        snapshotted so toggle-off restores them.
         """
+        for attr, value in _COMMON_DISPLAY.items():
+            setattr(layer, attr, value)
+        layer.tail_width = _BASE_TAIL_WIDTH
         layer.properties = {
             **dict(layer.properties),
             key: np.full(len(layer.data), 0.5),
@@ -256,10 +262,9 @@ class SpacetimeLift:
         spec = ROLE_DISPLAY.get(role)
         if spec is None:
             return
-        for key, value in _COMMON_DISPLAY.items():
-            setattr(layer, key, value)
-        layer.tail_width = _BASE_TAIL_WIDTH * spec["width_factor"]
         self._apply_colormap(layer, spec["colormap"], f"_lift_{role}")
+        # Error roles get a wider tail than the shared base.
+        layer.tail_width = _BASE_TAIL_WIDTH * spec["width_factor"]
 
     # --- transforms ---------------------------------------------------------
 
