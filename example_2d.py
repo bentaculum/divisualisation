@@ -21,7 +21,6 @@ from traccuracy.loaders import load_ctc_data
 from traccuracy.matchers import CTCMatcher
 from traccuracy.metrics import CTCMetrics
 
-from divisualisation import add_edge_error_tracks
 from divisualisation.utils import (
     graph_to_napari_tracks,
     load_tiff_timeseries,
@@ -56,15 +55,33 @@ pred_graph = ctc_matched.pred_graph
 viewer = napari.Viewer()
 viewer.theme = "dark"
 viewer.add_image(img, name="raw", colormap="gray")
-viewer.add_labels(pred.segmentation, name="predicted masks", opacity=0.3)
+# Both GT and predicted segmentation labels, so the plugin's "Compute errors"
+# workflow can match them.
+viewer.add_labels(gt.segmentation, name="gt masks", opacity=0.3, visible=False)
+viewer.add_labels(pred.segmentation, name="pred masks", opacity=0.3)
 
-# GT and predicted tracks with the same tail settings the app defaults to.
+# GT and predicted tracks. Carry each detection's segmentation label id so the
+# plugin can compute edge errors, and drop division-node duplicates so the
+# tracks round-trip cleanly back into a graph.
 for graph, name in ((gt_graph, "GT tracks"), (pred_graph, "predicted tracks")):
-    tracks, tracks_graph, _ = graph_to_napari_tracks(graph.graph, include_z=False)
-    viewer.add_tracks(tracks, graph=tracks_graph, name=name, tail_length=5)
+    tracks, tracks_graph, props = graph_to_napari_tracks(
+        graph.graph,
+        properties=["segmentation_id"],
+        include_z=False,
+        drop_division_duplicates=True,
+    )
+    viewer.add_tracks(
+        tracks,
+        graph=tracks_graph,
+        name=name,
+        properties={"segmentation_id": np.asarray(props["segmentation_id"])},
+        tail_length=5,
+    )
 
-# Flat edge-error overlays (false negatives / false positives).
-add_edge_error_tracks(viewer, gt_graph, pred_graph, tail_width=4)
+# Errors are NOT precomputed: open Plugins -> divisualisation -> Spacetime lift,
+# switch to "GT / pred errors" mode, and click "Compute errors" to add the
+# false-negative / false-positive overlays. (Or call add_edge_error_tracks
+# directly, as the flat functional API.)
 
 # Dock the plugin widgets so you can toggle + play interactively.
 viewer.window.add_plugin_dock_widget("divisualisation", "Edge error toggle")
