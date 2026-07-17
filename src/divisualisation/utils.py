@@ -201,6 +201,7 @@ def graph_to_napari_tracks(
     graph: nx.DiGraph,
     properties: Sequence[str] = (),
     include_z: bool = True,
+    drop_division_duplicates: bool = False,
 ):
     """Convert a track graph to napari tracks.
 
@@ -236,9 +237,11 @@ def graph_to_napari_tracks(
         start = cs[0]
         if start in track_end_to_track_id and len(cs) > 1:
             tracks_graph[label] = track_end_to_track_id[start]
-            # nodes = cs[1:]
-            # Include division edges as first edge of chain
-            nodes = cs
+            # By default keep the shared division node in the child chain so the
+            # napari renderer draws the division edge. When round-tripping back
+            # into a graph, drop it (the division is carried by tracks_graph)
+            # to avoid a duplicate detection / spurious zero-length edge.
+            nodes = cs[1:] if drop_division_duplicates else cs
         else:
             nodes = cs
 
