@@ -165,6 +165,12 @@ class SpacetimeLift:
             self._viewer.reset_view()
             self._viewer.camera.angles = _DEFAULT_LIFT_ANGLES
             self._viewer.camera.perspective = _DEFAULT_LIFT_PERSPECTIVE
+            # Pull the camera center back along depth (axis 0) to half the
+            # lifted cone's height, keeping the framed y/x.
+            n_timepoints = self._viewer.dims.nsteps[0]
+            center = list(self._viewer.camera.center)
+            center[0] = -0.5 * self._time_scale * n_timepoints
+            self._viewer.camera.center = center
         # Restore the timepoint (reset_view / data changes reset it); this also
         # drives _update_sweep to the right slice via the point event. Set only
         # the time axis, since ndim grew from 3 to 4.
