@@ -104,19 +104,17 @@ class SpacetimeLift:
             self._refold_tracks()
             self._update_sweep()
 
-    def apply(self, layer_roles, default_colormap=None):
+    def apply(self, layer_roles):
         """Lift the declared track layers; sweep-clip image/labels; go 3D.
 
         Args:
             layer_roles: Either a mapping ``{role: layer_name}`` (role is one of
                 ``ROLES``) or a plain iterable of layer names. A mapping applies
-                each role's "error view" display look; a plain iterable applies
-                ``default_colormap`` (if given) to every listed tracks layer.
+                each role's "error view" look (including its colormap); a plain
+                iterable applies only the shared spacetime look (tail length /
+                width / blending / opacity), keeping each layer's own coloring.
                 Prior display settings are snapshotted and restored on revert.
                 All roles are optional; unknown or missing names are skipped.
-            default_colormap: Colormap name applied to every lifted tracks layer
-                when ``layer_roles`` is a plain iterable (e.g. "Greens"). Ignored
-                for the role-mapping form.
 
         Idempotent: calling apply while already applied is a no-op.
         """
@@ -145,10 +143,9 @@ class SpacetimeLift:
                     role = name_to_role[layer.name]
                     if role is not None:
                         self._apply_display(layer, role)
-                    elif default_colormap is not None:
-                        self._apply_colormap(
-                            layer, default_colormap, f"_lift_{layer.name}"
-                        )
+                    else:
+                        # Lift-all: shared look only, keep the layer's coloring.
+                        self._apply_common_display(layer)
                 else:
                     self._expand_to_volume(layer)
 
@@ -265,16 +262,22 @@ class SpacetimeLift:
                 b.__exit__(None, None, None)
 
     @staticmethod
-    def _apply_colormap(layer, colormap, key):
-        """Give a lifted track layer the spacetime look: the shared display
-        settings from the original renderer (tail_length, blending, opacity) and
-        a flat ``colormap`` via a constant property stored under ``key`` (unique
-        per layer so overlaid layers don't clash). Prior settings are already
+    def _apply_common_display(layer):
+        """Apply the shared spacetime look from the original renderer
+        (tail_length, blending, opacity, base tail width) to a lifted track
+        layer, leaving its coloring untouched. Prior settings are already
         snapshotted so toggle-off restores them.
         """
         for attr, value in _COMMON_DISPLAY.items():
             setattr(layer, attr, value)
         layer.tail_width = _BASE_TAIL_WIDTH
+
+    @staticmethod
+    def _apply_colormap(layer, colormap, key):
+        """Color a lifted track layer flat with ``colormap`` via a constant
+        property stored under ``key`` (unique per layer so overlaid layers don't
+        clash). Prior coloring is already snapshotted so toggle-off restores it.
+        """
         layer.properties = {
             **dict(layer.properties),
             key: np.full(len(layer.data), 0.5),
@@ -293,6 +296,7 @@ class SpacetimeLift:
         spec = ROLE_DISPLAY.get(role)
         if spec is None:
             return
+        self._apply_common_display(layer)
         self._apply_colormap(layer, spec["colormap"], f"_lift_{role}")
         # Error roles get a wider tail than the shared base.
         layer.tail_width = _BASE_TAIL_WIDTH * spec["width_factor"]

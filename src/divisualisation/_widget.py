@@ -29,7 +29,7 @@ class LiftAllTracksWidget(Container):
         self._viewer = viewer
         self._lift = SpacetimeLift(viewer)
 
-        self._enabled = CheckBox(value=False, text="Spacetime lift")
+        self._enabled = CheckBox(value=False, text="Lift all tracks layers")
         self._lift_amount = FloatSlider(value=12, min=0, max=99, label="lift")
         self._enabled.changed.connect(self._on_toggle)
         self._lift_amount.changed.connect(self._on_lift_amount)
@@ -42,7 +42,7 @@ class LiftAllTracksWidget(Container):
         if self._enabled.value:
             self._lift.time_scale = self._lift_amount.value
             # Lift every tracks layer, coloring them all green (like main's GT).
-            self._lift.apply(self._all_tracks_layer_names(), default_colormap="Greens")
+            self._lift.apply(self._all_tracks_layer_names())
         else:
             self._lift.revert()
 

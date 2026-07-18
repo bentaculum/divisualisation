@@ -43,7 +43,7 @@ def test_lift_all_widget_lifts_all_tracks(make_napari_viewer):
         layer = viewer.layers[name]
         assert layer.data.shape[1] == 5
         np.testing.assert_allclose(layer.data[:, 2], 15 * layer.data[:, 1])
-        assert layer.color_by.startswith("_lift_")
+        assert layer.color_by == "track_id"  # own coloring kept
     assert viewer.dims.ndisplay == 3
 
     widget._enabled.value = False
