@@ -55,6 +55,59 @@ _COMMON_DISPLAY = {
 # Base tail width; error roles get ``width_factor`` x this.
 _BASE_TAIL_WIDTH = 2
 
+# Tracks-layer attributes NOT snapshotted generically as "display state": data
+# and geometry (restored explicitly), color (color_by/colormap/properties, which
+# are coupled and order-sensitive), and internal/interaction/identity emitters.
+# Everything else the layer exposes as an event (tail_width, opacity,
+# head_length, tail_length, blending, display_tail, ...) is captured
+# generically, so new napari display params are picked up without naming them.
+_NON_DISPLAY_ATTRS = frozenset({
+    "data",
+    "set_data",
+    "reload",
+    "loaded",
+    "refresh",
+    "rebuild_graph",
+    "rebuild_tracks",
+    "scale",
+    "translate",
+    "affine",
+    "rotate",
+    "shear",
+    "extent",
+    "_extent_augmented",
+    "properties",
+    "color_by",
+    "colormap",
+    "name",
+    "metadata",
+    "thumbnail",
+    "status",
+    "help",
+    "cursor",
+    "cursor_size",
+    "_overlays",
+    "mode",
+    "editable",
+    "locked",
+    "mouse_pan",
+    "mouse_zoom",
+    "scale_factor",
+    "units",
+    "axis_labels",
+    "projection_mode",
+    "display_id",
+    "visible",
+})
+
+
+def _display_attrs(layer):
+    """The Tracks layer's user-facing display attributes, derived from its event
+    emitters minus the non-display set. Generic, so it tracks napari changes.
+    """
+    return sorted(set(layer.events.emitters) - _NON_DISPLAY_ATTRS)
+
+
 # Default camera rotation for the first lift: a near-orthogonal 3D view of the
 # image plane. Tuned for napari >= 0.7, which overhauled the camera-angle
 # convention (0.7.0, a breaking change: default angles (0,0,90) -> (0,0,0) and
@@ -231,17 +284,17 @@ class SpacetimeLift:
             ]),
         }
         # Display settings only exist on Tracks layers; snapshot them so the
-        # "error view" look can be fully reverted on toggle-off.
+        # "error view" look can be fully reverted on toggle-off. All exposed
+        # display attributes are captured generically (tail_width, opacity,
+        # head_length, ...); color (color_by/colormap/properties) is kept
+        # separate because those are coupled and must be restored in order.
         if _is_tracks(layer):
             snap["graph"] = dict(layer.graph)
-            snap["display"] = {
+            snap["display"] = {a: getattr(layer, a) for a in _display_attrs(layer)}
+            snap["color"] = {
                 "colormap": layer.colormap,
                 "color_by": layer.color_by,
                 "properties": {k: v.copy() for k, v in layer.properties.items()},
-                "tail_length": layer.tail_length,
-                "tail_width": layer.tail_width,
-                "blending": layer.blending,
-                "opacity": layer.opacity,
             }
         return snap
 
@@ -255,17 +308,17 @@ class SpacetimeLift:
             layer.data = snap["data"]
             if "graph" in snap:
                 layer.graph = snap["graph"]
+        color = snap.get("color")
+        if color is not None:
+            # Restore properties before color_by so the key exists.
+            layer.properties = color["properties"]
+            if color["color_by"] in layer.properties or not layer.properties:
+                layer.color_by = color["color_by"]
+            layer.colormap = color["colormap"]
         display = snap.get("display")
         if display is not None:
-            # Restore properties before color_by so the key exists.
-            layer.properties = display["properties"]
-            if display["color_by"] in layer.properties or not layer.properties:
-                layer.color_by = display["color_by"]
-            layer.colormap = display["colormap"]
-            layer.tail_length = display["tail_length"]
-            layer.tail_width = display["tail_width"]
-            layer.blending = display["blending"]
-            layer.opacity = display["opacity"]
+            for attr, value in display.items():
+                setattr(layer, attr, value)
         layer.scale = snap["scale"]
         layer.translate = snap["translate"]
         layer.experimental_clipping_planes = snap["clipping_planes"]

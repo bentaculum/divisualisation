@@ -176,3 +176,30 @@ def test_missing_roles_are_skipped():
     assert v.layers["GT tracks"].data.shape[1] == 5
     lift.revert()
     assert v.layers["GT tracks"].data.shape[1] == 4
+
+
+def test_lift_restores_all_display_params():
+    # Any display attribute the user changed (not just the ones the lift sets)
+    # is snapshotted generically and restored on revert.
+    v = ViewerModel()
+    v.add_image(np.zeros((6, 8, 8)), name="raw")
+    layer = v.add_tracks(
+        np.array([[1, t, 5, 5] for t in range(6)], float), name="tracks"
+    )
+    layer.tail_width = 7
+    layer.opacity = 0.42
+    layer.head_length = 3
+    layer.tail_length = 55
+    layer.blending = "opaque"
+    before = {
+        a: getattr(layer, a)
+        for a in ("tail_width", "opacity", "head_length", "tail_length", "blending")
+    }
+
+    lift = SpacetimeLift(v, time_scale=10)
+    lift.apply(["tracks"])  # lift-all overwrites some of these
+    lift.revert()
+
+    layer = v.layers["tracks"]
+    after = {a: getattr(layer, a) for a in before}
+    assert after == before
