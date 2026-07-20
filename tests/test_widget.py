@@ -180,3 +180,54 @@ def test_role_change_relifts_live(make_napari_viewer):
     w._role_combos["gt"].value = "other tracks"
     assert "other tracks" in w._lift._track_bases
     assert w._lift.applied
+
+
+def test_compute_during_lift_reapplies_and_keeps_dropdowns(
+    make_napari_viewer, monkeypatch
+):
+    import numpy as np
+    from traccuracy import EdgeFlag
+
+    import divisualisation.errors as errors_mod
+    from divisualisation._widget import SpacetimeWidget
+
+    viewer = make_napari_viewer()
+    viewer.add_image(np.zeros((4, 8, 8)), name="raw")
+    for nm in ("GT tracks", "predicted tracks"):
+        viewer.add_tracks(
+            np.array([[1, t, 2, 3] for t in range(4)], float),
+            name=nm,
+            properties={"segmentation_id": np.arange(4)},
+        )
+    viewer.add_labels(np.zeros((4, 8, 8), int), name="gt masks")
+    viewer.add_labels(np.zeros((4, 8, 8), int), name="pred masks")
+
+    # Stub the heavy CTC computation: just add two flat error tracks layers.
+    def fake_compute(v, gt_t, gt_l, pred_t, pred_l, **kw):
+        out = {}
+        for flag in (EdgeFlag.CTC_FALSE_NEG, EdgeFlag.CTC_FALSE_POS):
+            layer = v.add_tracks(
+                np.array([[1, 0, 2, 3], [1, 1, 2, 3]], float),
+                name=str(flag.value),
+            )
+            out[flag] = layer
+        return out
+
+    monkeypatch.setattr(errors_mod, "compute_edge_errors_from_layers", fake_compute)
+
+    w = SpacetimeWidget(viewer)
+    w._lift_errors.value = True  # lift GT/pred
+    assert "GT tracks" in w._lift._track_bases
+
+    w._on_compute()  # compute (stubbed) while lifted
+
+    # GT/pred stay lifted; the new error layers are lifted + role-colored.
+    for nm in ("GT tracks", "predicted tracks"):
+        assert nm in w._lift._track_bases
+        assert viewer.layers[nm].data.shape[1] == 5
+    fn = str(EdgeFlag.CTC_FALSE_NEG.value)
+    assert fn in w._lift._track_bases
+    assert viewer.layers[fn].color_by == "_lift_fn_edges"
+    # Dropdowns still work and include the new error layers.
+    assert fn in w._role_combos["fn_edges"].choices
+    assert w._role_combos["gt"].enabled

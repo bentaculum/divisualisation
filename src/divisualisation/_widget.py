@@ -239,6 +239,8 @@ class SpacetimeWidget(Container):
     # --- compute errors -----------------------------------------------------
 
     def _on_compute(self, *_):
+        from traccuracy import EdgeFlag
+
         from .errors import compute_edge_errors_from_layers
 
         layers = self._viewer.layers
@@ -260,11 +262,36 @@ class SpacetimeWidget(Container):
             raise ValueError(
                 "Computing errors needs " + ", ".join(missing) + " to be set."
             )
-        compute_edge_errors_from_layers(
+        # If a lift is active, the tracks layers currently hold lifted (folded)
+        # coordinates. Revert so error computation runs on the original data,
+        # then re-apply afterwards so the new error layers get lifted too.
+        was_lifted = self._lift.applied
+        if was_lifted:
+            self._lift.revert()
+
+        error_layers = compute_edge_errors_from_layers(
             self._viewer,
             layers[gt_tracks],
             layers[gt_labels],
             layers[pred_tracks],
             layers[pred_labels],
         )
+        # Refresh dropdown choices (the new error layers must be present as
+        # options) then point the FN/FP roles at them. Guard with _refreshing so
+        # these programmatic combo updates don't each trigger a re-lift.
         self._refresh_choices()
+        role_by_flag = {
+            "fn_edges": EdgeFlag.CTC_FALSE_NEG,
+            "fp_edges": EdgeFlag.CTC_FALSE_POS,
+        }
+        self._refreshing = True
+        try:
+            for role, flag in role_by_flag.items():
+                layer = error_layers.get(flag)
+                if layer is not None and layer.name in self._role_combos[role].choices:
+                    self._role_combos[role].value = layer.name
+        finally:
+            self._refreshing = False
+
+        if was_lifted:
+            self._apply_lift(self._roles_target())
