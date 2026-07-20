@@ -156,3 +156,27 @@ def test_toggles_are_toggle_switches(make_napari_viewer):
     w = SpacetimeWidget(make_napari_viewer())
     assert isinstance(w._lift_all.native, QToggleSwitch)
     assert isinstance(w._lift_errors.native, QToggleSwitch)
+
+
+def test_role_change_relifts_live(make_napari_viewer):
+    from divisualisation._widget import SpacetimeWidget
+
+    viewer = make_napari_viewer()
+    viewer.add_image(np.zeros((6, 20, 20)), name="raw")
+    viewer.add_tracks(
+        np.array([[1, t, 5, 5] for t in range(6)], float), name="GT tracks"
+    )
+    viewer.add_tracks(
+        np.array([[2, t, 8, 8] for t in range(6)], float), name="other tracks"
+    )
+    w = SpacetimeWidget(viewer)
+    w._lift_errors.value = True
+
+    # Dropdowns are editable while the Divisualisation toggle is on.
+    assert w._role_combos["gt"].enabled
+    assert "GT tracks" in w._lift._track_bases
+
+    # Changing the GT role re-applies the lift with the new selection.
+    w._role_combos["gt"].value = "other tracks"
+    assert "other tracks" in w._lift._track_bases
+    assert w._lift.applied

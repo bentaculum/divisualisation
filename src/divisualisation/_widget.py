@@ -80,10 +80,16 @@ class SpacetimeWidget(Container):
             self._compute_btn,
         ]
 
+        # Guard so programmatic combo updates (name-guessing) don't trigger the
+        # re-lift handler.
+        self._refreshing = False
+
         self._lift_all.changed.connect(self._on_toggle_all)
         self._lift_errors.changed.connect(self._on_toggle_errors)
         self._lift_amount.changed.connect(self._on_lift_amount)
         self._compute_btn.changed.connect(self._on_compute)
+        for combo in (*self._role_combos.values(), self._gt_labels, self._pred_labels):
+            combo.changed.connect(self._on_role_changed)
 
         self.extend([
             self._lift_all,
@@ -136,17 +142,23 @@ class SpacetimeWidget(Container):
     def _on_lift_amount(self, *_):
         self._lift.time_scale = self._lift_amount.value
 
+    def _on_role_changed(self, *_):
+        # A role/label dropdown changed. If the Divisualisation lift is active,
+        # re-apply it live with the new selection. Ignore programmatic updates
+        # from name-guessing (_refresh_choices).
+        if self._refreshing:
+            return
+        if self._lift_errors.value and self._lift.applied:
+            self._apply_lift(self._roles_target())
+
     def _update_error_controls_visibility(self):
-        # Error controls are visible only in the Divisualisation workflow. The
-        # role/label dropdowns are disabled during an active lift (changing them
-        # mid-lift would be inconsistent), but Compute stays clickable whenever
-        # the toggle is on so errors can be computed at any time.
+        # Error controls are visible and editable whenever the Divisualisation
+        # workflow is on; changing a role/label dropdown re-applies the lift
+        # live (see _on_role_changed). Compute is likewise always clickable.
         visible = self._lift_errors.value
         for w in self._error_controls:
             w.visible = visible
-        for combo in (*self._role_combos.values(), self._gt_labels, self._pred_labels):
-            combo.enabled = visible and not self._lift.applied
-        self._compute_btn.enabled = visible
+            w.enabled = visible
 
     # --- layer discovery ----------------------------------------------------
 
@@ -183,6 +195,13 @@ class SpacetimeWidget(Container):
     def _refresh_choices(self, *_):
         if self._lift.applied:
             return  # don't reshuffle while a lift is active
+        self._refreshing = True
+        try:
+            self._refresh_choices_impl()
+        finally:
+            self._refreshing = False
+
+    def _refresh_choices_impl(self):
         track_names = self._track_layer_names()
         track_choices = [_NONE_CHOICE, *track_names]
         assigned = {
