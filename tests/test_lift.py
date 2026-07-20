@@ -203,3 +203,24 @@ def test_lift_restores_all_display_params():
     layer = v.layers["tracks"]
     after = {a: getattr(layer, a) for a in before}
     assert after == before
+
+
+def test_lifted_display_tweaks_persist_across_toggle():
+    # A display param changed WHILE lifted persists on the next lift, separately
+    # from the layer's own non-lifted value.
+    v = ViewerModel()
+    v.add_image(np.zeros((6, 8, 8)), name="raw")
+    v.add_tracks(
+        np.array([[1, t, 5, 5] for t in range(6)], float),
+        name="tracks",
+        tail_width=2,
+    )
+    lift = SpacetimeLift(v, time_scale=10)
+    lift.apply(["tracks"])
+    v.layers["tracks"].tail_width = 12  # widen while lifted
+    lift.revert()
+    # Non-lifted value restored.
+    assert v.layers["tracks"].tail_width == 2
+    # Re-lift restores the lifted tweak.
+    lift.apply(["tracks"])
+    assert v.layers["tracks"].tail_width == 12

@@ -137,6 +137,11 @@ class SpacetimeLift:
         # Remembered lifted-view camera, so toggling off then on returns to the
         # same 3D view. None until the first lift.
         self._lift_camera: dict | None = None
+        # Remembered lifted-view display params per layer (layer name -> {attr:
+        # value}), so tweaks made while lifted (e.g. a wider tail) persist across
+        # toggling the lift off and on -- separately from the layer's own
+        # non-lifted settings, which the snapshot restores on toggle-off.
+        self._lift_display: dict[str, dict] = {}
 
     @property
     def applied(self) -> bool:
@@ -211,6 +216,7 @@ class SpacetimeLift:
                     else:
                         # Lift-all: shared look only, keep the layer's coloring.
                         self._apply_common_display(layer)
+                        self._restore_lift_display(layer)
                 else:
                     self._expand_to_volume(layer)
 
@@ -253,10 +259,12 @@ class SpacetimeLift:
         # Keep the slider where it is across the toggle (restoring data resets it).
         current_time = self._viewer.dims.current_step[0]
 
-        # Remember the lifted view camera BEFORE restoring layers, so toggling
-        # back on returns to it. Restoring layer data changes the scene extent
-        # and makes napari re-zoom, so capturing after would corrupt the zoom.
+        # Remember the lifted view (camera + per-layer display params) BEFORE
+        # restoring layers, so toggling back on returns to it. Restoring layer
+        # data changes the scene extent and makes napari re-zoom / reset the
+        # display, so capturing after would lose these.
         self._lift_camera = self._camera_state()
+        self._capture_lift_display()
 
         for layer in self._viewer.layers:
             snap = self._snapshots.get(layer.name)
@@ -380,6 +388,27 @@ class SpacetimeLift:
         )
         # Error roles get a wider tail than the shared base.
         layer.tail_width = _BASE_TAIL_WIDTH * spec["width_factor"]
+        # Re-apply any display tweaks the user made in a previous lifted view so
+        # they persist across toggling (e.g. a wider tail set while lifted).
+        self._restore_lift_display(layer)
+
+    def _restore_lift_display(self, layer):
+        """Overlay this layer's remembered lifted-view display params (if any)
+        onto the freshly applied role/common look.
+        """
+        for attr, value in self._lift_display.get(layer.name, {}).items():
+            setattr(layer, attr, value)
+
+    def _capture_lift_display(self):
+        """Remember each lifted layer's current display params, so re-lifting
+        restores them (independent of the layer's non-lifted settings).
+        """
+        for name in self._track_bases:
+            if name in self._viewer.layers:
+                layer = self._viewer.layers[name]
+                self._lift_display[name] = {
+                    a: getattr(layer, a) for a in _display_attrs(layer)
+                }
 
     # --- transforms ---------------------------------------------------------
 
