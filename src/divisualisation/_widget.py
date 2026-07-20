@@ -130,9 +130,30 @@ class SpacetimeWidget(Container):
             if self._lift_all.value:  # enforce mutual exclusivity
                 self._lift_all.value = False
             self._apply_lift(self._lift_errors_engine, self._roles_target())
-        elif not self._lift_all.value:
-            self._revert_lift()
+            # Default the Divisualisation view to hiding the predicted-tracks
+            # layer (its errors are shown by the FN/FP overlays); remember its
+            # prior visibility to restore on toggle-off.
+            self._hide_predicted()
+        else:
+            self._restore_predicted()
+            if not self._lift_all.value:
+                self._revert_lift()
         self._update_error_controls_visibility()
+
+    def _hide_predicted(self):
+        name = self._role_combos["pred"].value
+        if name and name != _NONE_CHOICE and name in self._viewer.layers:
+            layer = self._viewer.layers[name]
+            self._pred_prior_visible = (name, layer.visible)
+            layer.visible = False
+
+    def _restore_predicted(self):
+        prior = getattr(self, "_pred_prior_visible", None)
+        if prior is not None:
+            name, was_visible = prior
+            if name in self._viewer.layers:
+                self._viewer.layers[name].visible = was_visible
+            self._pred_prior_visible = None
 
     def _apply_lift(self, engine, target):
         # Revert whichever engine is currently active so switching modes (and

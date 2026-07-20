@@ -239,3 +239,23 @@ def test_all_lifted_layers_share_head_length():
     lift.apply({"gt": "gt", "fn_edges": "err", "pred": "", "fp_edges": ""})
     assert v.layers["gt"].head_length == 0
     assert v.layers["err"].head_length == 0
+
+
+def test_slider_change_keeps_error_colors():
+    # Changing the lift amount re-folds the data; the role colormap/color_by
+    # must survive (setting layer.data resets properties, which would drop the
+    # error-view coloring).
+    v = ViewerModel()
+    v.add_image(np.zeros((6, 8, 8)), name="raw")
+    v.add_tracks(np.array([[1, t, 5, 5] for t in range(6)], float), name="gt")
+    lift = SpacetimeLift(v, time_scale=10)
+    lift.apply({"gt": "gt", "pred": "", "fn_edges": "", "fp_edges": ""})
+    layer = v.layers["gt"]
+    color_by = layer.color_by
+    assert color_by == "_lift_gt"
+    # move the lift slider
+    lift.time_scale = 30
+    assert v.layers["gt"].color_by == color_by  # unchanged
+    np.testing.assert_allclose(
+        v.layers["gt"].data[:, 2], -30 * v.layers["gt"].data[:, 1]
+    )

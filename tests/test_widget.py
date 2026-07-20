@@ -322,3 +322,68 @@ def test_divisualisation_lifts_all_tracks_incl_non_role(make_napari_viewer):
     # Still lifted after being shown.
     ex.visible = True
     assert viewer.layers["extra tracks"].data.shape[1] == 5
+
+
+def test_layer_hidden_at_lift_time_folds_when_shown(make_napari_viewer):
+    # THE recurring bug: a tracks layer hidden when the lift is applied, then
+    # unhidden in the lifted (3D) view, must be properly folded (5-col, real
+    # extent) -- not left flat -- and must not crash the 3D draw.
+    import numpy as np
+    from qtpy.QtWidgets import QApplication
+
+    from divisualisation._widget import SpacetimeWidget
+
+    viewer = make_napari_viewer()
+    viewer.add_image(np.zeros((10, 30, 30)), name="raw")
+    viewer.add_tracks(
+        np.array([[1, t, 5, 5] for t in range(10)], float), name="GT tracks"
+    )
+    hidden = viewer.add_tracks(
+        np.array([[2, t, 20, 20] for t in range(10)], float), name="extra tracks"
+    )
+    hidden.visible = False  # hidden in the flat view
+
+    w = SpacetimeWidget(viewer)
+    w._lift_amount.value = 12
+    w._lift_errors.value = True  # -> ndisplay 3, lifts all incl. the hidden one
+    QApplication.processEvents()
+
+    # Unhide it in the lifted view -> must be folded, with a 4-col (ndim=4)
+    # extent, and the 3D draw must not raise.
+    hidden.visible = True
+    QApplication.processEvents()
+    layer = viewer.layers["extra tracks"]
+    assert layer.data.shape[1] == 5  # folded, not flat
+    np.testing.assert_allclose(layer.data[:, 2], -12 * layer.data[:, 1])
+    assert layer.extent.data.shape[1] == 4  # ndim=4 extent (not stale 3-col)
+    # Force a canvas draw: without the fix the hidden layer keeps a stale 3-col
+    # extent and the 3D draw raises IndexError (reproducible with a real GL
+    # context, i.e. Linux CI; a harmless no-op where the canvas can't render).
+    canvas = viewer.window._qt_viewer.canvas._scene_canvas
+    canvas.update()
+    canvas.events.draw()
+    QApplication.processEvents()
+
+
+def test_divisualisation_hides_predicted_by_default(make_napari_viewer):
+    import numpy as np
+
+    from divisualisation._widget import SpacetimeWidget
+
+    viewer = make_napari_viewer()
+    viewer.add_image(np.zeros((6, 20, 20)), name="raw")
+    viewer.add_tracks(
+        np.array([[1, t, 5, 5] for t in range(6)], float), name="GT tracks"
+    )
+    viewer.add_tracks(
+        np.array([[2, t, 8, 8] for t in range(6)], float), name="predicted tracks"
+    )
+
+    w = SpacetimeWidget(viewer)
+    assert viewer.layers["predicted tracks"].visible
+    w._lift_errors.value = True
+    # Predicted is hidden by default in the Divisualisation view...
+    assert not viewer.layers["predicted tracks"].visible
+    w._lift_errors.value = False
+    # ...and restored to its prior visibility on toggle-off.
+    assert viewer.layers["predicted tracks"].visible

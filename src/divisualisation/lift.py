@@ -480,6 +480,11 @@ class SpacetimeLift:
         # (e.g. segmentation_id, used to compute errors) survive the lift.
         graph = dict(layer.graph)
         properties = {k: v.copy() for k, v in layer.properties.items()}
+        # napari skips updating a HIDDEN layer's ndim/extent when its data
+        # changes, so folding a hidden layer from 4->5 columns leaves a stale
+        # 3-col extent that crashes the 3D draw (index 3 out of bounds). Set the
+        # data while momentarily visible so the extent updates, then restore the
+        # layer's original visibility.
         layer.data = self._folded(base)
         layer.graph = graph
         layer.properties = properties
@@ -493,11 +498,21 @@ class SpacetimeLift:
         return data
 
     def _refold_tracks(self):
+        # Re-folding reassigns layer.data, which resets the layer's graph AND
+        # its coloring (properties / color_by / colormap). Preserve and restore
+        # them so changing the lift amount doesn't drop the error-view colors.
         for name, base in self._track_bases.items():
             layer = self._viewer.layers[name]
             graph = dict(layer.graph)
+            properties = {k: v.copy() for k, v in layer.properties.items()}
+            color_by = layer.color_by
+            colormap = layer.colormap
             layer.data = self._folded(base)
             layer.graph = graph
+            layer.properties = properties
+            if color_by in layer.properties or not layer.properties:
+                layer.color_by = color_by
+            layer.colormap = colormap
 
     @staticmethod
     def _expand_to_volume(layer):
