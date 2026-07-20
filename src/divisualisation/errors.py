@@ -275,6 +275,13 @@ def compute_edge_errors_from_layers(
     from traccuracy.metrics import CTCMetrics
 
     def to_graph(tracks, labels, name):
+        if seg_id_key not in tracks.properties:
+            raise ValueError(
+                f"Tracks layer {tracks.name!r} has no {seg_id_key!r} property, "
+                "which is needed to match detections to the segmentation. Add "
+                "the tracks with that per-detection property (e.g. "
+                'graph_to_napari_tracks(..., properties=["segmentation_id"])).'
+            )
         props = {seg_id_key: np.asarray(tracks.properties[seg_id_key])}
         return load_napari_data(
             np.asarray(tracks.data),

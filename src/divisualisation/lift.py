@@ -341,11 +341,14 @@ class SpacetimeLift:
             # 3D + t: keep the real z; lifting adds the time offset on top of it.
             base = data.copy()
         self._track_bases[layer.name] = base
-        # Reassigning .data resets the layer's division graph; restore it so the
-        # division/lineage edges keep drawing (lifted with the node coordinates).
+        # Reassigning .data resets the layer's graph and properties; restore both
+        # so division/lineage edges keep drawing and per-detection properties
+        # (e.g. segmentation_id, used to compute errors) survive the lift.
         graph = dict(layer.graph)
+        properties = {k: v.copy() for k, v in layer.properties.items()}
         layer.data = self._folded(base)
         layer.graph = graph
+        layer.properties = properties
 
     def _folded(self, base: np.ndarray) -> np.ndarray:
         data = base.copy()
