@@ -13,7 +13,7 @@ from contextlib import contextmanager
 
 import napari
 import numpy as np
-from napari.utils.colormaps.colormap_utils import vispy_or_mpl_colormap
+from napari.utils.colormaps.colormap_utils import ensure_colormap
 
 from .errors import ERROR_COLOR_VALUE
 
@@ -246,7 +246,7 @@ class SpacetimeLift:
         if _is_tracks(layer):
             snap["graph"] = dict(layer.graph)
             snap["display"] = {
-                "colormaps_dict": dict(layer.colormaps_dict),
+                "colormap": layer.colormap,
                 "color_by": layer.color_by,
                 "properties": {k: v.copy() for k, v in layer.properties.items()},
                 "tail_length": layer.tail_length,
@@ -268,11 +268,11 @@ class SpacetimeLift:
                 layer.graph = snap["graph"]
         display = snap.get("display")
         if display is not None:
-            # Restore properties/colormap before color_by so the key exists.
+            # Restore properties before color_by so the key exists.
             layer.properties = display["properties"]
-            layer.colormaps_dict = display["colormaps_dict"]
             if display["color_by"] in layer.properties or not layer.properties:
                 layer.color_by = display["color_by"]
+            layer.colormap = display["colormap"]
             layer.tail_length = display["tail_length"]
             layer.tail_width = display["tail_width"]
             layer.blending = display["blending"]
@@ -308,11 +308,10 @@ class SpacetimeLift:
 
     @staticmethod
     def _apply_colormap(layer, colormap, key, value=_MID_COLOR_VALUE, noise_std=0.0):
-        """Color a lifted track layer flat with ``colormap`` sampled at
-        ``value``, via a (near-)constant property stored under ``key`` (unique
-        per layer so overlaid layers don't clash). ``noise_std`` adds a small
-        Gaussian jitter to that value per point. Prior coloring is already
-        snapshotted so toggle-off restores it.
+        """Color a lifted track layer with ``colormap`` via a (near-)constant
+        property stored under ``key``, sampled at ``value``. ``noise_std`` adds a
+        small Gaussian jitter per point. Prior coloring is already snapshotted so
+        toggle-off restores it.
         """
         prop = np.full(len(layer.data), value, dtype=float)
         if noise_std:
@@ -323,11 +322,13 @@ class SpacetimeLift:
             **dict(layer.properties),
             key: prop,
         }
-        layer.colormaps_dict = {
-            **dict(layer.colormaps_dict),
-            key: vispy_or_mpl_colormap(colormap),
-        }
         layer.color_by = key
+        # Register the colormap by name so it is selectable, then activate it as
+        # the layer's colormap -- this is what the napari colormap dropdown shows
+        # and controls. (A Tracks layer ignores colormaps_dict for the dropdown,
+        # so setting it there leaves the dropdown inert.)
+        ensure_colormap(colormap)
+        layer.colormap = colormap
 
     def _apply_display(self, layer, role):
         """Give a lifted track layer the "error view" look for its role.
