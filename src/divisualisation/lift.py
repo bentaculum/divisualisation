@@ -429,15 +429,20 @@ class SpacetimeLift:
 
     def _lift_tracks_layer(self, layer):
         """Fold time into z for one tracks layer, matching the original render."""
-        data = np.asarray(layer.data, dtype=float)
-        if data.shape[1] == 4:
-            # 2D + t: [id, t, y, x] -> [id, t, z=0, y, x]. The inserted z is 0,
-            # so lifting invents a z purely from time.
-            base = np.insert(data, 2, 0.0, axis=1)
+        if layer.name in self._track_bases:
+            # Already lifted (its live data is folded): re-fold from the stored
+            # flat base rather than the current data, so we never double-fold.
+            base = self._track_bases[layer.name]
         else:
-            # 3D + t: keep the real z; lifting adds the time offset on top of it.
-            base = data.copy()
-        self._track_bases[layer.name] = base
+            data = np.asarray(layer.data, dtype=float)
+            if data.shape[1] == 4:
+                # 2D + t: [id, t, y, x] -> [id, t, z=0, y, x]. The inserted z is
+                # 0, so lifting invents a z purely from time.
+                base = np.insert(data, 2, 0.0, axis=1)
+            else:
+                # 3D + t: keep the real z; lifting adds the time offset on top.
+                base = data.copy()
+            self._track_bases[layer.name] = base
         # Reassigning .data resets the layer's graph and properties; restore both
         # so division/lineage edges keep drawing and per-detection properties
         # (e.g. segmentation_id, used to compute errors) survive the lift.

@@ -263,3 +263,30 @@ def test_camera_shared_display_per_view(make_napari_viewer):
     w._lift_all.value = True
     assert viewer.layers["GT tracks"].tail_width == 9
     assert viewer.camera.zoom == pytest.approx(3.3)
+
+
+def test_role_reassign_dedups_and_lifts_all(make_napari_viewer):
+    import numpy as np
+
+    from divisualisation._widget import SpacetimeWidget
+
+    viewer = make_napari_viewer()
+    viewer.add_image(np.zeros((6, 20, 20)), name="raw")
+    for nm in ("GT tracks", "predicted tracks", "ctc_fp"):
+        viewer.add_tracks(np.array([[1, t, 5, 5] for t in range(6)], float), name=nm)
+
+    w = SpacetimeWidget(viewer)
+    # gt -> GT tracks, fp_edges -> ctc_fp (name-guessed)
+    w._lift_errors.value = True
+    assert w._role_combos["fp_edges"].value == "ctc_fp"
+
+    # Reassign ctc_fp to the gt role: it must leave fp_edges (a layer fills one
+    # role), and every declared role layer must be lifted (none left flat).
+    w._role_combos["gt"].value = "ctc_fp"
+    assert w._role_combos["gt"].value == "ctc_fp"
+    assert w._role_combos["fp_edges"].value == "—"  # cleared
+    roles = w._roles_target()
+    for name in roles.values():
+        assert viewer.layers[name].data.shape[1] == 5  # lifted
+    # The layer dropped from all roles is un-lifted (flat) again.
+    assert viewer.layers["GT tracks"].data.shape[1] == 4

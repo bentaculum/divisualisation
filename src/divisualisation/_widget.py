@@ -95,8 +95,10 @@ class SpacetimeWidget(Container):
         self._lift_errors.changed.connect(self._on_toggle_errors)
         self._lift_amount.changed.connect(self._on_lift_amount)
         self._compute_btn.changed.connect(self._on_compute)
-        for combo in (*self._role_combos.values(), self._gt_labels, self._pred_labels):
-            combo.changed.connect(self._on_role_changed)
+        for role, combo in self._role_combos.items():
+            combo.changed.connect(lambda *_, r=role: self._on_role_changed(r))
+        for combo in (self._gt_labels, self._pred_labels):
+            combo.changed.connect(lambda *_: self._on_role_changed(None))
 
         self.extend([
             self._lift_all,
@@ -154,12 +156,25 @@ class SpacetimeWidget(Container):
         for e in (self._lift_all_engine, self._lift_errors_engine):
             e.time_scale = self._lift_amount.value
 
-    def _on_role_changed(self, *_):
-        # A role/label dropdown changed. If the Divisualisation lift is active,
-        # re-apply it live with the new selection. Ignore programmatic updates
-        # from name-guessing (_refresh_choices).
+    def _on_role_changed(self, changed_role=None):
+        # A role/label dropdown changed. Ignore programmatic updates from
+        # name-guessing (_refresh_choices).
         if self._refreshing:
             return
+        # A layer may fill only one role: if the changed role now points at a
+        # layer another role already uses, clear that other role (the just-set
+        # role wins). Guard so these programmatic clears don't recurse.
+        if changed_role is not None:
+            value = self._role_combos[changed_role].value
+            if value and value != _NONE_CHOICE:
+                self._refreshing = True
+                try:
+                    for role, combo in self._role_combos.items():
+                        if role != changed_role and combo.value == value:
+                            combo.value = _NONE_CHOICE
+                finally:
+                    self._refreshing = False
+        # Re-apply live if the Divisualisation lift is active.
         if self._lift_errors.value and self._lift_errors_engine.applied:
             self._apply_lift(self._lift_errors_engine, self._roles_target())
 
