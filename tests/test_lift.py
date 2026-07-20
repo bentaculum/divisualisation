@@ -224,3 +224,18 @@ def test_lifted_display_tweaks_persist_across_toggle():
     # Re-lift restores the lifted tweak.
     lift.apply(["tracks"])
     assert v.layers["tracks"].tail_width == 12
+
+
+def test_all_lifted_layers_share_head_length():
+    # Every lifted tracks layer gets head_length=0 so the clip plane cuts them
+    # identically (error layers are created with head_length=1, which offset
+    # them past the plane relative to gt/pred).
+    v = ViewerModel()
+    v.add_image(np.zeros((6, 8, 8)), name="raw")
+    v.add_tracks(np.array([[1, t, 5, 5] for t in range(6)], float), name="gt")
+    err = v.add_tracks(np.array([[2, t, 8, 8] for t in range(6)], float), name="err")
+    err.head_length = 1  # mimic add_edge_error_tracks
+    lift = SpacetimeLift(v, time_scale=10)
+    lift.apply({"gt": "gt", "fn_edges": "err", "pred": "", "fp_edges": ""})
+    assert v.layers["gt"].head_length == 0
+    assert v.layers["err"].head_length == 0

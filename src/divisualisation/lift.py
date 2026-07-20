@@ -46,9 +46,13 @@ ROLE_DISPLAY: dict[str, dict] = {
     "fn_edges": {"colormap": "cool", "width_factor": 2, "color_value": 0.0},
     "fp_edges": {"colormap": "cool", "width_factor": 2, "color_value": 1.0},
 }
-# Shared look applied to every lifted track layer regardless of role.
+# Shared look applied to every lifted track layer regardless of role. Includes
+# head_length=0 so the clipping plane cuts every layer identically -- error
+# layers are created with head_length=1, which drew them a couple of frames
+# past the plane relative to GT/pred (head_length=0).
 _COMMON_DISPLAY = {
     "tail_length": 1000,
+    "head_length": 0,
     "blending": "translucent_no_depth",
     "opacity": 1.0,
 }
@@ -270,13 +274,34 @@ class SpacetimeLift:
         # the time axis, since ndim grew from 3 to 4.
         self._viewer.dims.set_current_step(0, current_time)
         self._update_sweep()
+        # A layer hidden at lift time doesn't get its lifted transform pushed to
+        # the GPU; when later shown it would render at a stale position. Re-sync
+        # it on show.
+        for name in self._track_bases:
+            if name in self._viewer.layers:
+                self._viewer.layers[name].events.visible.connect(self._on_layer_visible)
+
+    def _on_layer_visible(self, event):
+        if not self._applied:
+            return
+        layer = event.source
+        if getattr(layer, "visible", False) and layer.name in self._track_bases:
+            # Re-apply the current sweep to this layer and force a redraw so the
+            # freshly shown layer picks up its lifted transform.
+            self._update_sweep()
+            layer.refresh()
 
     def revert(self):
         """Restore every layer and the viewer to their pre-apply state."""
         if not self._applied:
             return
-        # Disconnect before restoring so the callback cannot fire mid-revert.
+        # Disconnect before restoring so the callbacks cannot fire mid-revert.
         self._viewer.dims.events.point.disconnect(self._update_sweep)
+        for name in self._track_bases:
+            if name in self._viewer.layers:
+                self._viewer.layers[name].events.visible.disconnect(
+                    self._on_layer_visible
+                )
 
         # Keep the slider where it is across the toggle (restoring data resets it).
         current_time = self._viewer.dims.current_step[0]
