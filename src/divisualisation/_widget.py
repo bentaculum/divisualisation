@@ -58,7 +58,14 @@ class SpacetimeWidget(Container):
     def __init__(self, viewer: "napari.viewer.Viewer"):
         super().__init__()
         self._viewer = viewer
-        self._lift = SpacetimeLift(viewer)
+        # One lift engine per toggle view, so each view keeps its own
+        # layer-control settings. They share a camera store, so the camera
+        # (center/zoom/angles/perspective) is shared across the two views.
+        camera_store: dict = {}
+        self._lift_all_engine = SpacetimeLift(viewer, camera_store=camera_store)
+        self._lift_errors_engine = SpacetimeLift(viewer, camera_store=camera_store)
+        # Points at the engine for the currently active toggle.
+        self._lift = self._lift_all_engine
 
         # Two mutually exclusive toggles + one shared lift slider.
         self._lift_all = ToggleSwitch(value=False, label="Lift all tracks layers")
@@ -112,7 +119,7 @@ class SpacetimeWidget(Container):
         if self._lift_all.value:
             if self._lift_errors.value:  # enforce mutual exclusivity
                 self._lift_errors.value = False
-            self._apply_lift(self._all_tracks_target())
+            self._apply_lift(self._lift_all_engine, self._all_tracks_target())
         elif not self._lift_errors.value:
             self._revert_lift()
 
@@ -120,27 +127,32 @@ class SpacetimeWidget(Container):
         if self._lift_errors.value:
             if self._lift_all.value:  # enforce mutual exclusivity
                 self._lift_all.value = False
-            self._apply_lift(self._roles_target())
+            self._apply_lift(self._lift_errors_engine, self._roles_target())
         elif not self._lift_all.value:
             self._revert_lift()
         self._update_error_controls_visibility()
 
-    def _apply_lift(self, target):
-        # Revert any active lift first so switching modes rebuilds cleanly.
-        if self._lift.applied:
-            self._lift.revert()
-        self._lift.time_scale = self._lift_amount.value
-        self._lift.apply(target)
+    def _apply_lift(self, engine, target):
+        # Revert whichever engine is currently active so switching modes (and
+        # engines) rebuilds cleanly; the shared camera carries over.
+        for e in (self._lift_all_engine, self._lift_errors_engine):
+            if e.applied:
+                e.revert()
+        self._lift = engine
+        engine.time_scale = self._lift_amount.value
+        engine.apply(target)
         self._update_error_controls_visibility()
 
     def _revert_lift(self):
-        if self._lift.applied:
-            self._lift.revert()
+        for e in (self._lift_all_engine, self._lift_errors_engine):
+            if e.applied:
+                e.revert()
         self._refresh_choices()
         self._update_error_controls_visibility()
 
     def _on_lift_amount(self, *_):
-        self._lift.time_scale = self._lift_amount.value
+        for e in (self._lift_all_engine, self._lift_errors_engine):
+            e.time_scale = self._lift_amount.value
 
     def _on_role_changed(self, *_):
         # A role/label dropdown changed. If the Divisualisation lift is active,
@@ -148,8 +160,8 @@ class SpacetimeWidget(Container):
         # from name-guessing (_refresh_choices).
         if self._refreshing:
             return
-        if self._lift_errors.value and self._lift.applied:
-            self._apply_lift(self._roles_target())
+        if self._lift_errors.value and self._lift_errors_engine.applied:
+            self._apply_lift(self._lift_errors_engine, self._roles_target())
 
     def _update_error_controls_visibility(self):
         # Error controls are visible and editable whenever the Divisualisation
@@ -193,7 +205,7 @@ class SpacetimeWidget(Container):
         return _NONE_CHOICE
 
     def _refresh_choices(self, *_):
-        if self._lift.applied:
+        if self._lift_all_engine.applied or self._lift_errors_engine.applied:
             return  # don't reshuffle while a lift is active
         self._refreshing = True
         try:
@@ -265,9 +277,9 @@ class SpacetimeWidget(Container):
         # If a lift is active, the tracks layers currently hold lifted (folded)
         # coordinates. Revert so error computation runs on the original data,
         # then re-apply afterwards so the new error layers get lifted too.
-        was_lifted = self._lift.applied
+        was_lifted = self._lift_errors_engine.applied
         if was_lifted:
-            self._lift.revert()
+            self._lift_errors_engine.revert()
 
         error_layers = compute_edge_errors_from_layers(
             self._viewer,
@@ -294,4 +306,4 @@ class SpacetimeWidget(Container):
             self._refreshing = False
 
         if was_lifted:
-            self._apply_lift(self._roles_target())
+            self._apply_lift(self._lift_errors_engine, self._roles_target())

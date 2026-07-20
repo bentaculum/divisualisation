@@ -231,3 +231,35 @@ def test_compute_during_lift_reapplies_and_keeps_dropdowns(
     # Dropdowns still work and include the new error layers.
     assert fn in w._role_combos["fn_edges"].choices
     assert w._role_combos["gt"].enabled
+
+
+def test_camera_shared_display_per_view(make_napari_viewer):
+    import numpy as np
+
+    from divisualisation._widget import SpacetimeWidget
+
+    viewer = make_napari_viewer()
+    viewer.add_image(np.zeros((6, 20, 20)), name="raw")
+    viewer.add_tracks(
+        np.array([[1, t, 5, 5] for t in range(6)], float),
+        name="GT tracks",
+        tail_width=2,
+    )
+
+    w = SpacetimeWidget(viewer)
+    # Lift-all view: tweak the shared camera and a per-view display param.
+    w._lift_all.value = True
+    viewer.camera.zoom = 3.3
+    viewer.layers["GT tracks"].tail_width = 9
+
+    # Switch to the errors view.
+    w._lift_errors.value = True
+    # Camera is shared across views.
+    assert viewer.camera.zoom == pytest.approx(3.3)
+    # Display is NOT shared: the errors view has its own tail_width.
+    assert viewer.layers["GT tracks"].tail_width != 9
+
+    # Back to lift-all: its own display tweak is remembered; camera still shared.
+    w._lift_all.value = True
+    assert viewer.layers["GT tracks"].tail_width == 9
+    assert viewer.camera.zoom == pytest.approx(3.3)

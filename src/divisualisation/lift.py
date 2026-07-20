@@ -125,7 +125,12 @@ class SpacetimeLift:
         time_scale: How far tracks lift per unit time. Higher = steeper cone.
     """
 
-    def __init__(self, viewer: napari.Viewer, time_scale: float = 12):
+    def __init__(
+        self,
+        viewer: napari.Viewer,
+        time_scale: float = 12,
+        camera_store: dict | None = None,
+    ):
         self._viewer = viewer
         self._time_scale = time_scale
         self._applied = False
@@ -134,18 +139,28 @@ class SpacetimeLift:
         # 5-column base tracks (z zeroed) per lifted layer, so changing the lift
         # amount is a cheap recompute from the original time column.
         self._track_bases: dict[str, np.ndarray] = {}
-        # Remembered lifted-view camera, so toggling off then on returns to the
-        # same 3D view. None until the first lift.
-        self._lift_camera: dict | None = None
+        # Remembered lifted-view camera. Held in a shared dict so several lift
+        # instances (e.g. the two plugin toggles) share ONE camera across views;
+        # toggling off then on returns to the same 3D view. Pass the same
+        # ``camera_store`` to share it. None until the first lift.
+        self._camera_store = {} if camera_store is None else camera_store
         # Remembered lifted-view display params per layer (layer name -> {attr:
         # value}), so tweaks made while lifted (e.g. a wider tail) persist across
-        # toggling the lift off and on -- separately from the layer's own
-        # non-lifted settings, which the snapshot restores on toggle-off.
+        # toggling the lift off and on. Per-instance (NOT shared), so each view
+        # keeps its own layer-control settings.
         self._lift_display: dict[str, dict] = {}
 
     @property
     def applied(self) -> bool:
         return self._applied
+
+    @property
+    def _lift_camera(self):
+        return self._camera_store.get("camera")
+
+    @_lift_camera.setter
+    def _lift_camera(self, value):
+        self._camera_store["camera"] = value
 
     def _camera_state(self) -> dict:
         cam = self._viewer.camera
