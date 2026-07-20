@@ -79,6 +79,10 @@ class SpacetimeLift:
         # Remembered lifted-view camera, so toggling off then on returns to the
         # same 3D view. None until the first lift.
         self._lift_camera: dict | None = None
+        # Remembered per-layer colormap chosen while lifted (layer name ->
+        # colormap name), so re-lifting a layer restores the colormap the user
+        # picked rather than resetting to the role default.
+        self._lift_colormaps: dict[str, str] = {}
 
     @property
     def applied(self) -> bool:
@@ -193,6 +197,13 @@ class SpacetimeLift:
 
         # Keep the slider where it is across the toggle (restoring data resets it).
         current_time = self._viewer.dims.current_step[0]
+
+        # Remember each lifted layer's current colormap (the user may have
+        # changed it) before restore resets it, so re-lifting keeps that choice.
+        for name in self._track_bases:
+            if name in self._viewer.layers:
+                cmap = self._viewer.layers[name].colormap
+                self._lift_colormaps[name] = getattr(cmap, "name", cmap)
 
         for layer in self._viewer.layers:
             snap = self._snapshots.get(layer.name)
@@ -314,9 +325,10 @@ class SpacetimeLift:
         if spec is None:
             return
         self._apply_common_display(layer)
-        self._apply_colormap(
-            layer, spec["colormap"], f"_lift_{role}", spec["color_value"]
-        )
+        # Restore the colormap the user last chose for this layer while lifted,
+        # falling back to the role default on the first lift.
+        colormap = self._lift_colormaps.get(layer.name, spec["colormap"])
+        self._apply_colormap(layer, colormap, f"_lift_{role}", spec["color_value"])
         # Error roles get a wider tail than the shared base.
         layer.tail_width = _BASE_TAIL_WIDTH * spec["width_factor"]
 
