@@ -232,6 +232,14 @@ class SpacetimeLift:
 
     @staticmethod
     def _restore_layer(layer, snap: dict):
+        # Restore data (and graph) FIRST: setting a Tracks layer's .data resets
+        # its properties/graph, so display state must be restored afterwards.
+        if _is_labels(layer):
+            _set_labels_data(layer, snap["data"])
+        else:
+            layer.data = snap["data"]
+            if "graph" in snap:
+                layer.graph = snap["graph"]
         display = snap.get("display")
         if display is not None:
             # Restore properties/colormap before color_by so the key exists.
@@ -243,12 +251,6 @@ class SpacetimeLift:
             layer.tail_width = display["tail_width"]
             layer.blending = display["blending"]
             layer.opacity = display["opacity"]
-        if _is_labels(layer):
-            _set_labels_data(layer, snap["data"])
-        else:
-            layer.data = snap["data"]
-            if "graph" in snap:
-                layer.graph = snap["graph"]
         layer.scale = snap["scale"]
         layer.translate = snap["translate"]
         layer.experimental_clipping_planes = snap["clipping_planes"]

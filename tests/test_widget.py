@@ -99,3 +99,40 @@ def test_errors_widget_applies_role_look(make_napari_viewer):
     assert viewer.dims.ndisplay == 2
     assert layer.tail_length == 5  # restored
     assert layer.color_by == "track_id"
+
+
+def test_errors_widget_dropdowns_populate_before_lift(make_napari_viewer):
+    import numpy as np
+
+    from divisualisation._widget import ErrorsWidget
+
+    viewer = make_napari_viewer()
+    viewer.add_tracks(np.array([[1, 0, 2, 3], [1, 1, 2, 3]], float), name="GT tracks")
+    viewer.add_tracks(
+        np.array([[2, 0, 5, 5], [2, 1, 5, 5]], float), name="predicted tracks"
+    )
+    viewer.add_labels(np.zeros((2, 8, 8), int), name="gt masks")
+    viewer.add_labels(np.zeros((2, 8, 8), int), name="pred masks")
+
+    widget = ErrorsWidget(viewer)
+    viewer.window.add_dock_widget(widget)
+    # Let the deferred (QTimer.singleShot) re-guess fire after the dock reset.
+    from qtpy.QtWidgets import QApplication
+
+    QApplication.processEvents()
+    QApplication.processEvents()
+
+    # Roles/labels are usable immediately, without toggling the lift first.
+    assert widget._role_combos["gt"].value == "GT tracks"
+    assert widget._role_combos["pred"].value == "predicted tracks"
+    assert widget._gt_labels.value == "gt masks"
+    assert widget._pred_labels.value == "pred masks"
+
+
+def test_lift_toggle_is_a_toggle_switch(make_napari_viewer):
+    from superqt import QToggleSwitch
+
+    from divisualisation._widget import LiftAllTracksWidget
+
+    widget = LiftAllTracksWidget(make_napari_viewer())
+    assert isinstance(widget._enabled.native, QToggleSwitch)

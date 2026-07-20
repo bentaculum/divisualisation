@@ -11,43 +11,82 @@ Two fixed widgets (each additive; the functional API works without them):
 """
 
 import napari
-from magicgui.widgets import CheckBox, ComboBox, Container, FloatSlider, PushButton
+from magicgui.backends._qtpy.widgets import QBaseValueWidget
+from magicgui.widgets import ComboBox, Container, FloatSlider, PushButton
+from magicgui.widgets.bases import ValueWidget
+from qtpy.QtCore import QTimer
+from superqt import QToggleSwitch
 
 from .lift import ROLES, SpacetimeLift, _is_tracks
 
 
-class LiftAllTracksWidget(Container):
-    """Lift all tracks layers into the spacetime view, keeping their coloring.
+class _ToggleSwitchBackend(QBaseValueWidget):
+    def __init__(self, **kwargs):
+        super().__init__(QToggleSwitch, "isChecked", "setChecked", "toggled", **kwargs)
 
-    A single lift-amount slider drives every tracks layer in the viewer; the
-    checkbox toggles the 3D time->z lift on and off. The cutting plane stays
-    synchronized to the tracks exactly as in the original renderer.
+
+class ToggleSwitch(ValueWidget):
+    """A magicgui on/off value widget rendered as a sliding toggle switch."""
+
+    def __init__(self, **kwargs):
+        super().__init__(widget_type=_ToggleSwitchBackend, **kwargs)
+
+
+class _LiftWidgetBase(Container):
+    """Shared lift controls: a toggle switch + a live lift-amount slider.
+
+    Subclasses provide :meth:`_lift_target` (what to pass to ``SpacetimeLift``)
+    and may override :meth:`_on_lift_applied` / :meth:`_on_lift_reverted`.
     """
 
-    def __init__(self, viewer: "napari.viewer.Viewer"):
+    def __init__(self, viewer: "napari.viewer.Viewer", toggle_text: str):
         super().__init__()
         self._viewer = viewer
         self._lift = SpacetimeLift(viewer)
 
-        self._enabled = CheckBox(value=False, text="Lift all tracks layers")
+        self._enabled = ToggleSwitch(value=False, label=toggle_text)
         self._lift_amount = FloatSlider(value=12, min=0, max=99, label="lift")
         self._enabled.changed.connect(self._on_toggle)
         self._lift_amount.changed.connect(self._on_lift_amount)
-        self.extend([self._enabled, self._lift_amount])
 
-    def _all_tracks_layer_names(self):
-        return [layer.name for layer in self._viewer.layers if _is_tracks(layer)]
+    def _lift_target(self):
+        """Return the argument passed to ``SpacetimeLift.apply`` (override)."""
+        raise NotImplementedError
+
+    def _on_lift_applied(self):
+        pass
+
+    def _on_lift_reverted(self):
+        pass
 
     def _on_toggle(self, *_):
         if self._enabled.value:
             self._lift.time_scale = self._lift_amount.value
-            # Lift every tracks layer, coloring them all green (like main's GT).
-            self._lift.apply(self._all_tracks_layer_names())
+            self._lift.apply(self._lift_target())
+            self._on_lift_applied()
         else:
             self._lift.revert()
+            self._on_lift_reverted()
 
     def _on_lift_amount(self, *_):
         self._lift.time_scale = self._lift_amount.value
+
+
+class LiftAllTracksWidget(_LiftWidgetBase):
+    """Lift all tracks layers into the spacetime view, keeping their coloring.
+
+    A single lift-amount slider drives every tracks layer in the viewer; the
+    toggle switches the 3D time->z lift on and off. The cutting plane stays
+    synchronized to the tracks exactly as in the original renderer.
+    """
+
+    def __init__(self, viewer: "napari.viewer.Viewer"):
+        super().__init__(viewer, toggle_text="Lift all tracks layers")
+        self.extend([self._enabled, self._lift_amount])
+
+    def _lift_target(self):
+        # Every tracks layer; a plain list keeps each layer's own coloring.
+        return [layer.name for layer in self._viewer.layers if _is_tracks(layer)]
 
 
 # One dropdown per lift role, with a human label and substrings used to guess
@@ -68,7 +107,7 @@ _LABELS_HINTS = {"gt": ("gt", "ground"), "pred": ("pred", "res")}
 _NONE_CHOICE = "—"  # blank / skip this role
 
 
-class ErrorsWidget(Container):
+class ErrorsWidget(_LiftWidgetBase):
     """Lift GT/pred tracks with the error-view look; optionally compute errors.
 
     Declare each role's tracks layer (prefilled by name-guessing, all optional).
@@ -79,12 +118,7 @@ class ErrorsWidget(Container):
     """
 
     def __init__(self, viewer: "napari.viewer.Viewer"):
-        super().__init__()
-        self._viewer = viewer
-        self._lift = SpacetimeLift(viewer)
-
-        self._enabled = CheckBox(value=False, text="Spacetime lift")
-        self._lift_amount = FloatSlider(value=12, min=0, max=99, label="lift")
+        super().__init__(viewer, toggle_text="Spacetime lift")
         self._role_combos = {
             role: ComboBox(label=_ROLE_LABELS[role], choices=[_NONE_CHOICE])
             for role in ROLES
@@ -92,9 +126,6 @@ class ErrorsWidget(Container):
         self._gt_labels = ComboBox(label="GT labels", choices=[_NONE_CHOICE])
         self._pred_labels = ComboBox(label="pred labels", choices=[_NONE_CHOICE])
         self._compute_btn = PushButton(text="Compute errors")
-
-        self._enabled.changed.connect(self._on_toggle)
-        self._lift_amount.changed.connect(self._on_lift_amount)
         self._compute_btn.changed.connect(self._on_compute)
         self.extend([
             self._enabled,
@@ -108,6 +139,11 @@ class ErrorsWidget(Container):
         self._viewer.layers.events.inserted.connect(self._refresh_choices)
         self._viewer.layers.events.removed.connect(self._refresh_choices)
         self._refresh_choices()
+
+        # add_dock_widget resets combo values right after __init__. Re-guess on
+        # the next event-loop tick, once that reset has settled, so the dropdowns
+        # are usable immediately (before any lift).
+        QTimer.singleShot(0, self._refresh_choices)
 
     # --- layer discovery ----------------------------------------------------
 
@@ -169,7 +205,7 @@ class ErrorsWidget(Container):
 
     # --- lift ---------------------------------------------------------------
 
-    def _layer_roles(self):
+    def _lift_target(self):
         return {
             role: combo.value
             for role, combo in self._role_combos.items()
@@ -183,18 +219,12 @@ class ErrorsWidget(Container):
         self._pred_labels.enabled = enabled
         self._compute_btn.enabled = enabled
 
-    def _on_toggle(self, *_):
-        if self._enabled.value:
-            self._lift.time_scale = self._lift_amount.value
-            self._lift.apply(self._layer_roles())
-            self._set_inputs_enabled(False)
-        else:
-            self._lift.revert()
-            self._set_inputs_enabled(True)
-            self._refresh_choices()
+    def _on_lift_applied(self):
+        self._set_inputs_enabled(False)
 
-    def _on_lift_amount(self, *_):
-        self._lift.time_scale = self._lift_amount.value
+    def _on_lift_reverted(self):
+        self._set_inputs_enabled(True)
+        self._refresh_choices()
 
     # --- compute errors -----------------------------------------------------
 

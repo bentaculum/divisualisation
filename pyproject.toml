@@ -25,6 +25,7 @@ classifiers = [
 
 dependencies = [
     "napari",
+    "superqt",
     "napari-animation",
     "magicgui",
     "numpy",
