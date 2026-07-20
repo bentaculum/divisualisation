@@ -29,8 +29,9 @@ def _clipping_planes(cut_at: float):
 # Every lifted layer gets a single constant color property, so each renders as
 # one flat color; the actual color is the layer's active colormap (chosen in the
 # GUI dropdown). The Tracks layer min-max normalizes the property before mapping,
-# so a constant value collapses to one color regardless of the value used.
-_COLOR_VALUE = 1.0
+# so a constant value collapses to one color regardless of the value used --
+# ``color_value`` is thus bookkeeping only (0.5 for gt/pred, 1.0 for errors).
+_DEFAULT_COLOR_VALUE = 0.5
 
 # The four track roles the lift understands and the "error view" look each one
 # takes on toggle-on (all reverted on toggle-off). Matches the original
@@ -38,16 +39,10 @@ _COLOR_VALUE = 1.0
 # cool with a doubled tail width. ``colormap`` is a matplotlib/vispy name.
 ROLES = ("gt", "pred", "fn_edges", "fp_edges")
 ROLE_DISPLAY: dict[str, dict] = {
-    "gt": {"colormap": "Greens", "width_factor": 1},
-    "pred": {"colormap": "Wistia", "width_factor": 1},
-    "fn_edges": {
-        "colormap": "cool",
-        "width_factor": 2,
-    },
-    "fp_edges": {
-        "colormap": "cool",
-        "width_factor": 2,
-    },
+    "gt": {"colormap": "Greens", "width_factor": 1, "color_value": 0.5},
+    "pred": {"colormap": "Wistia", "width_factor": 1, "color_value": 0.5},
+    "fn_edges": {"colormap": "cool", "width_factor": 2, "color_value": 1.0},
+    "fp_edges": {"colormap": "cool", "width_factor": 2, "color_value": 1.0},
 }
 # Shared look applied to every lifted track layer regardless of role.
 _COMMON_DISPLAY = {
@@ -293,14 +288,14 @@ class SpacetimeLift:
         layer.tail_width = _BASE_TAIL_WIDTH
 
     @staticmethod
-    def _apply_colormap(layer, colormap, key):
+    def _apply_colormap(layer, colormap, key, value=_DEFAULT_COLOR_VALUE):
         """Color a lifted track layer flat with ``colormap`` via a constant
-        property (all edges = ``_COLOR_VALUE``) stored under ``key``. Prior
-        coloring is already snapshotted so toggle-off restores it.
+        property (all edges = ``value``) stored under ``key``. Prior coloring is
+        already snapshotted so toggle-off restores it.
         """
         layer.properties = {
             **dict(layer.properties),
-            key: np.full(len(layer.data), _COLOR_VALUE),
+            key: np.full(len(layer.data), value),
         }
         layer.color_by = key
         # Register the colormap by name so it is selectable, then activate it as
@@ -319,7 +314,9 @@ class SpacetimeLift:
         if spec is None:
             return
         self._apply_common_display(layer)
-        self._apply_colormap(layer, spec["colormap"], f"_lift_{role}")
+        self._apply_colormap(
+            layer, spec["colormap"], f"_lift_{role}", spec["color_value"]
+        )
         # Error roles get a wider tail than the shared base.
         layer.tail_width = _BASE_TAIL_WIDTH * spec["width_factor"]
 
