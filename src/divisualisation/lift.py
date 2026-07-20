@@ -57,7 +57,7 @@ _BASE_TAIL_WIDTH = 2
 # image plane. Tuned for napari >= 0.7, which overhauled the camera-angle
 # convention (0.7.0, a breaking change: default angles (0,0,90) -> (0,0,0) and
 # intuitive right-handed rotations). Pre-0.7 angles were different.
-_DEFAULT_LIFT_ANGLES = (-15, -2, -55)
+_DEFAULT_LIFT_ANGLES = (-15, -2, -65)
 _DEFAULT_LIFT_PERSPECTIVE = 27
 
 

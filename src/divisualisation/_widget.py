@@ -1,13 +1,15 @@
-"""Optional napari dock widgets for divisualisation.
+"""Optional napari dock widget for divisualisation.
 
-Two fixed widgets (each additive; the functional API works without them):
+``SpacetimeWidget`` (Plugins -> divisualisation) offers two mutually exclusive
+workflows via two toggle switches sharing one lift-amount slider:
 
-- ``LiftAllTracksWidget`` lifts every tracks layer in the viewer into the 3D
-  time->z "spacetime" view, keeping each layer's own coloring, with a live
-  lift-amount slider. Toggling off restores the flat 2D view.
-- ``ErrorsWidget`` declares the GT / predicted / FN-edge / FP-edge tracks
-  layers by role, can compute the CTC edge errors from the GT/pred tracks +
-  segmentation labels, and lifts with the traditional error-view look.
+- **Lift all tracks layers**: lift every tracks layer into the 3D time->z
+  "spacetime" view, keeping each layer's own coloring.
+- **GT / pred errors**: declare the GT / predicted / FN-edge / FP-edge tracks
+  layers by role (name-guessed), optionally compute the CTC edge errors from the
+  GT/pred tracks + segmentation labels, and lift with the error-view look.
+
+Additive: the functional API works without it.
 """
 
 import napari
@@ -32,63 +34,6 @@ class ToggleSwitch(ValueWidget):
         super().__init__(widget_type=_ToggleSwitchBackend, **kwargs)
 
 
-class _LiftWidgetBase(Container):
-    """Shared lift controls: a toggle switch + a live lift-amount slider.
-
-    Subclasses provide :meth:`_lift_target` (what to pass to ``SpacetimeLift``)
-    and may override :meth:`_on_lift_applied` / :meth:`_on_lift_reverted`.
-    """
-
-    def __init__(self, viewer: "napari.viewer.Viewer", toggle_text: str):
-        super().__init__()
-        self._viewer = viewer
-        self._lift = SpacetimeLift(viewer)
-
-        self._enabled = ToggleSwitch(value=False, label=toggle_text)
-        self._lift_amount = FloatSlider(value=12, min=0, max=99, label="lift")
-        self._enabled.changed.connect(self._on_toggle)
-        self._lift_amount.changed.connect(self._on_lift_amount)
-
-    def _lift_target(self):
-        """Return the argument passed to ``SpacetimeLift.apply`` (override)."""
-        raise NotImplementedError
-
-    def _on_lift_applied(self):
-        pass
-
-    def _on_lift_reverted(self):
-        pass
-
-    def _on_toggle(self, *_):
-        if self._enabled.value:
-            self._lift.time_scale = self._lift_amount.value
-            self._lift.apply(self._lift_target())
-            self._on_lift_applied()
-        else:
-            self._lift.revert()
-            self._on_lift_reverted()
-
-    def _on_lift_amount(self, *_):
-        self._lift.time_scale = self._lift_amount.value
-
-
-class LiftAllTracksWidget(_LiftWidgetBase):
-    """Lift all tracks layers into the spacetime view, keeping their coloring.
-
-    A single lift-amount slider drives every tracks layer in the viewer; the
-    toggle switches the 3D time->z lift on and off. The cutting plane stays
-    synchronized to the tracks exactly as in the original renderer.
-    """
-
-    def __init__(self, viewer: "napari.viewer.Viewer"):
-        super().__init__(viewer, toggle_text="Lift all tracks layers")
-        self.extend([self._enabled, self._lift_amount])
-
-    def _lift_target(self):
-        # Every tracks layer; a plain list keeps each layer's own coloring.
-        return [layer.name for layer in self._viewer.layers if _is_tracks(layer)]
-
-
 # One dropdown per lift role, with a human label and substrings used to guess
 # which track layer fills the role from its name.
 _ROLE_LABELS = {
@@ -107,18 +52,20 @@ _LABELS_HINTS = {"gt": ("gt", "ground"), "pred": ("pred", "res")}
 _NONE_CHOICE = "—"  # blank / skip this role
 
 
-class ErrorsWidget(_LiftWidgetBase):
-    """Lift GT/pred tracks with the error-view look; optionally compute errors.
-
-    Declare each role's tracks layer (prefilled by name-guessing, all optional).
-    "Compute errors" runs CTC matching from the GT/pred tracks + segmentation
-    label layers and adds the FN/FP overlays. The lift applies the traditional
-    look (GT->Greens, pred->Wistia, errors->cool) and restores each layer's own
-    settings on toggle-off.
-    """
+class SpacetimeWidget(Container):
+    """Two mutually exclusive lift workflows sharing one lift-amount slider."""
 
     def __init__(self, viewer: "napari.viewer.Viewer"):
-        super().__init__(viewer, toggle_text="Spacetime lift")
+        super().__init__()
+        self._viewer = viewer
+        self._lift = SpacetimeLift(viewer)
+
+        # Two mutually exclusive toggles + one shared lift slider.
+        self._lift_all = ToggleSwitch(value=False, label="Lift all tracks layers")
+        self._lift_errors = ToggleSwitch(value=False, label="GT / pred errors")
+        self._lift_amount = FloatSlider(value=12, min=0, max=99, label="lift")
+
+        # Error-view controls (shown only while the errors toggle is on).
         self._role_combos = {
             role: ComboBox(label=_ROLE_LABELS[role], choices=[_NONE_CHOICE])
             for role in ROLES
@@ -126,26 +73,89 @@ class ErrorsWidget(_LiftWidgetBase):
         self._gt_labels = ComboBox(label="GT labels", choices=[_NONE_CHOICE])
         self._pred_labels = ComboBox(label="pred labels", choices=[_NONE_CHOICE])
         self._compute_btn = PushButton(text="Compute errors")
-        self._compute_btn.changed.connect(self._on_compute)
-        self.extend([
-            self._enabled,
-            self._lift_amount,
+        self._error_controls = [
             *self._role_combos.values(),
             self._gt_labels,
             self._pred_labels,
             self._compute_btn,
+        ]
+
+        self._lift_all.changed.connect(self._on_toggle_all)
+        self._lift_errors.changed.connect(self._on_toggle_errors)
+        self._lift_amount.changed.connect(self._on_lift_amount)
+        self._compute_btn.changed.connect(self._on_compute)
+
+        self.extend([
+            self._lift_all,
+            self._lift_errors,
+            self._lift_amount,
+            *self._error_controls,
         ])
 
         self._viewer.layers.events.inserted.connect(self._refresh_choices)
         self._viewer.layers.events.removed.connect(self._refresh_choices)
         self._refresh_choices()
-
-        # add_dock_widget resets combo values right after __init__. Re-guess on
-        # the next event-loop tick, once that reset has settled, so the dropdowns
-        # are usable immediately (before any lift).
+        self._update_error_controls_visibility()
+        # add_dock_widget resets combo values right after __init__; re-guess on
+        # the next event-loop tick so the dropdowns are usable immediately.
         QTimer.singleShot(0, self._refresh_choices)
 
+    # --- toggles ------------------------------------------------------------
+
+    def _on_toggle_all(self, *_):
+        if self._lift_all.value:
+            if self._lift_errors.value:  # enforce mutual exclusivity
+                self._lift_errors.value = False
+            self._apply_lift(self._all_tracks_target())
+        elif not self._lift_errors.value:
+            self._revert_lift()
+
+    def _on_toggle_errors(self, *_):
+        if self._lift_errors.value:
+            if self._lift_all.value:  # enforce mutual exclusivity
+                self._lift_all.value = False
+            self._apply_lift(self._roles_target())
+        elif not self._lift_all.value:
+            self._revert_lift()
+        self._update_error_controls_visibility()
+
+    def _apply_lift(self, target):
+        # Revert any active lift first so switching modes rebuilds cleanly.
+        if self._lift.applied:
+            self._lift.revert()
+        self._lift.time_scale = self._lift_amount.value
+        self._lift.apply(target)
+        self._update_error_controls_visibility()
+
+    def _revert_lift(self):
+        if self._lift.applied:
+            self._lift.revert()
+        self._refresh_choices()
+        self._update_error_controls_visibility()
+
+    def _on_lift_amount(self, *_):
+        self._lift.time_scale = self._lift_amount.value
+
+    def _update_error_controls_visibility(self):
+        # Error controls are visible only in the errors workflow; disabled while
+        # a lift is active so the roles can't change mid-lift.
+        visible = self._lift_errors.value
+        for w in self._error_controls:
+            w.visible = visible
+            w.enabled = visible and not self._lift.applied
+
     # --- layer discovery ----------------------------------------------------
+
+    def _all_tracks_target(self):
+        # Every tracks layer; a plain list keeps each layer's own coloring.
+        return [layer.name for layer in self._viewer.layers if _is_tracks(layer)]
+
+    def _roles_target(self):
+        return {
+            role: combo.value
+            for role, combo in self._role_combos.items()
+            if combo.value and combo.value != _NONE_CHOICE
+        }
 
     def _track_layer_names(self):
         return [layer.name for layer in self._viewer.layers if _is_tracks(layer)]
@@ -167,7 +177,7 @@ class ErrorsWidget(_LiftWidgetBase):
         return _NONE_CHOICE
 
     def _refresh_choices(self, *_):
-        if self._enabled.value:
+        if self._lift.applied:
             return  # don't reshuffle while a lift is active
         track_names = self._track_layer_names()
         track_choices = [_NONE_CHOICE, *track_names]
@@ -202,29 +212,6 @@ class ErrorsWidget(_LiftWidgetBase):
             combo.value = guess
             if guess != _NONE_CHOICE:
                 used.add(guess)
-
-    # --- lift ---------------------------------------------------------------
-
-    def _lift_target(self):
-        return {
-            role: combo.value
-            for role, combo in self._role_combos.items()
-            if combo.value and combo.value != _NONE_CHOICE
-        }
-
-    def _set_inputs_enabled(self, enabled):
-        for combo in self._role_combos.values():
-            combo.enabled = enabled
-        self._gt_labels.enabled = enabled
-        self._pred_labels.enabled = enabled
-        self._compute_btn.enabled = enabled
-
-    def _on_lift_applied(self):
-        self._set_inputs_enabled(False)
-
-    def _on_lift_reverted(self):
-        self._set_inputs_enabled(True)
-        self._refresh_choices()
 
     # --- compute errors -----------------------------------------------------
 
