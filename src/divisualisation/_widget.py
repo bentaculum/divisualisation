@@ -5,7 +5,7 @@ workflows via two toggle switches sharing one lift-amount slider:
 
 - **Lift all tracks layers**: lift every tracks layer into the 3D time->z
   "spacetime" view, keeping each layer's own coloring.
-- **GT / pred errors**: declare the GT / predicted / FN-edge / FP-edge tracks
+- **Divisualisation**: declare the GT / predicted / FN-edge / FP-edge tracks
   layers by role (name-guessed), optionally compute the CTC edge errors from the
   GT/pred tracks + segmentation labels, and lift with the error-view look.
 
@@ -62,7 +62,7 @@ class SpacetimeWidget(Container):
 
         # Two mutually exclusive toggles + one shared lift slider.
         self._lift_all = ToggleSwitch(value=False, label="Lift all tracks layers")
-        self._lift_errors = ToggleSwitch(value=False, label="GT / pred errors")
+        self._lift_errors = ToggleSwitch(value=False, label="Divisualisation")
         self._lift_amount = FloatSlider(value=12, min=0, max=99, label="lift")
 
         # Error-view controls (shown only while the errors toggle is on).
@@ -137,12 +137,16 @@ class SpacetimeWidget(Container):
         self._lift.time_scale = self._lift_amount.value
 
     def _update_error_controls_visibility(self):
-        # Error controls are visible only in the errors workflow; disabled while
-        # a lift is active so the roles can't change mid-lift.
+        # Error controls are visible only in the Divisualisation workflow. The
+        # role/label dropdowns are disabled during an active lift (changing them
+        # mid-lift would be inconsistent), but Compute stays clickable whenever
+        # the toggle is on so errors can be computed at any time.
         visible = self._lift_errors.value
         for w in self._error_controls:
             w.visible = visible
-            w.enabled = visible and not self._lift.applied
+        for combo in (*self._role_combos.values(), self._gt_labels, self._pred_labels):
+            combo.enabled = visible and not self._lift.applied
+        self._compute_btn.enabled = visible
 
     # --- layer discovery ----------------------------------------------------
 

@@ -58,7 +58,8 @@ _BASE_TAIL_WIDTH = 2
 # convention (0.7.0, a breaking change: default angles (0,0,90) -> (0,0,0) and
 # intuitive right-handed rotations). Pre-0.7 angles were different.
 _DEFAULT_LIFT_ANGLES = (-15, -2, -65)
-_DEFAULT_LIFT_PERSPECTIVE = 27
+_DEFAULT_LIFT_PERSPECTIVE = 35
+_DEFAULT_LIFT_ZOOM = 1
 
 
 class SpacetimeLift:
@@ -178,6 +179,7 @@ class SpacetimeLift:
             self._viewer.reset_view()
             self._viewer.camera.angles = _DEFAULT_LIFT_ANGLES
             self._viewer.camera.perspective = _DEFAULT_LIFT_PERSPECTIVE
+            self._viewer.camera.zoom = _DEFAULT_LIFT_ZOOM
             # Pull the camera center back along depth (axis 0) to half the
             # lifted cone's height, keeping the framed y/x.
             n_timepoints = self._viewer.dims.nsteps[0]
@@ -200,8 +202,11 @@ class SpacetimeLift:
         # Keep the slider where it is across the toggle (restoring data resets it).
         current_time = self._viewer.dims.current_step[0]
 
-        # Remember each lifted layer's current colormap (the user may have
-        # changed it) before restore resets it, so re-lifting keeps that choice.
+        # Remember the lifted view (camera + per-layer colormap) BEFORE restoring
+        # layers, so toggling back on returns to it. Restoring layer data changes
+        # the scene extent and makes napari re-zoom, so capturing after would
+        # corrupt the remembered zoom.
+        self._lift_camera = self._camera_state()
         for name in self._track_bases:
             if name in self._viewer.layers:
                 cmap = self._viewer.layers[name].colormap
@@ -211,9 +216,6 @@ class SpacetimeLift:
             snap = self._snapshots.get(layer.name)
             if snap is not None:
                 self._restore_layer(layer, snap)
-
-        # Remember where the lifted view was, so toggling back on returns to it.
-        self._lift_camera = self._camera_state()
 
         self._viewer.dims.ndisplay = self._viewer_snapshot["ndisplay"]
         self._set_camera_state(self._viewer_snapshot["camera"])

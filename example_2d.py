@@ -79,7 +79,7 @@ for graph, name in ((gt_graph, "GT tracks"), (pred_graph, "predicted tracks")):
     )
 
 # Errors are NOT precomputed: open Plugins -> divisualisation ->
-# "GT / pred errors" and click "Compute errors" to add the
+# "Divisualisation" and click "Compute errors" to add the
 # false-negative / false-positive overlays. (Or call add_edge_error_tracks
 # directly, as the flat functional API.)
 
