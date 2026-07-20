@@ -53,9 +53,11 @@ _COMMON_DISPLAY = {
 # Base tail width; error roles get ``width_factor`` x this.
 _BASE_TAIL_WIDTH = 2
 
-# Default camera for the first lift: a near-orthogonal 3D view of the image
-# plane, taken from the original example_2d on main.
-_DEFAULT_LIFT_ANGLES = (27.919484296382873, -49.86671510905139, -35.8190766165135)
+# Default camera rotation for the first lift: a near-orthogonal 3D view of the
+# image plane. Tuned for napari >= 0.7, which overhauled the camera-angle
+# convention (0.7.0, a breaking change: default angles (0,0,90) -> (0,0,0) and
+# intuitive right-handed rotations). Pre-0.7 angles were different.
+_DEFAULT_LIFT_ANGLES = (-15, -2, -70)
 _DEFAULT_LIFT_PERSPECTIVE = 27
 
 

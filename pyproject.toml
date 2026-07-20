@@ -24,7 +24,9 @@ classifiers = [
 ]
 
 dependencies = [
-    "napari",
+    # >=0.7 only for the lift's default camera angles (0.7.0 changed the angle
+    # convention). Safe to relax, but the default 3D view angles would be off.
+    "napari>=0.7",
     "superqt",
     "napari-animation",
     "magicgui",
