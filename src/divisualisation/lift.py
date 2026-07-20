@@ -33,6 +33,10 @@ def _clipping_planes(cut_at: float):
 # the error map ("cool") looks washed out at 0.5, so error edges use the vivid
 # endpoint (ERROR_COLOR_VALUE, imported from errors) instead.
 _MID_COLOR_VALUE = 0.5
+# Tiny Gaussian jitter added to the GT edges' colormap value so they are not a
+# single flat value (makes the GT layer's colormap dropdown span a hair of range
+# rather than collapsing to one point).
+_GT_COLOR_NOISE_STD = 1e-3
 
 # The four track roles the lift understands and the "error view" look each one
 # takes on toggle-on (all reverted on toggle-off). Matches the original
@@ -41,7 +45,12 @@ _MID_COLOR_VALUE = 0.5
 # ``color_value`` is where that colormap is sampled for the flat edge color.
 ROLES = ("gt", "pred", "fn_edges", "fp_edges")
 ROLE_DISPLAY: dict[str, dict] = {
-    "gt": {"colormap": "Greens", "width_factor": 1, "color_value": _MID_COLOR_VALUE},
+    "gt": {
+        "colormap": "Greens",
+        "width_factor": 1,
+        "color_value": _MID_COLOR_VALUE,
+        "noise_std": _GT_COLOR_NOISE_STD,
+    },
     "pred": {"colormap": "Wistia", "width_factor": 1, "color_value": _MID_COLOR_VALUE},
     "fn_edges": {
         "colormap": "cool",
@@ -298,15 +307,21 @@ class SpacetimeLift:
         layer.tail_width = _BASE_TAIL_WIDTH
 
     @staticmethod
-    def _apply_colormap(layer, colormap, key, value=_MID_COLOR_VALUE):
+    def _apply_colormap(layer, colormap, key, value=_MID_COLOR_VALUE, noise_std=0.0):
         """Color a lifted track layer flat with ``colormap`` sampled at
-        ``value``, via a constant property stored under ``key`` (unique per layer
-        so overlaid layers don't clash). Prior coloring is already snapshotted so
-        toggle-off restores it.
+        ``value``, via a (near-)constant property stored under ``key`` (unique
+        per layer so overlaid layers don't clash). ``noise_std`` adds a small
+        Gaussian jitter to that value per point. Prior coloring is already
+        snapshotted so toggle-off restores it.
         """
+        prop = np.full(len(layer.data), value, dtype=float)
+        if noise_std:
+            prop = prop + np.random.default_rng().normal(
+                0.0, noise_std, size=prop.shape
+            )
         layer.properties = {
             **dict(layer.properties),
-            key: np.full(len(layer.data), value),
+            key: prop,
         }
         layer.colormaps_dict = {
             **dict(layer.colormaps_dict),
@@ -324,7 +339,11 @@ class SpacetimeLift:
             return
         self._apply_common_display(layer)
         self._apply_colormap(
-            layer, spec["colormap"], f"_lift_{role}", spec["color_value"]
+            layer,
+            spec["colormap"],
+            f"_lift_{role}",
+            spec["color_value"],
+            spec.get("noise_std", 0.0),
         )
         # Error roles get a wider tail than the shared base.
         layer.tail_width = _BASE_TAIL_WIDTH * spec["width_factor"]
