@@ -15,8 +15,6 @@ import napari
 import numpy as np
 from napari.utils.colormaps.colormap_utils import ensure_colormap
 
-from .errors import COLOR_NOISE_STD, ERROR_COLOR_VALUE
-
 logger = logging.getLogger(__name__)
 
 
@@ -28,30 +26,27 @@ def _clipping_planes(cut_at: float):
     ]
 
 
-# Constant value at which each lifted layer samples its colormap (all edges get
-# the same flat color). Mid-range reads well for the sequential GT/pred maps;
-# the error map ("cool") looks washed out at 0.5, so error edges use the vivid
-# endpoint (ERROR_COLOR_VALUE, imported from errors) instead.
-_MID_COLOR_VALUE = 0.5
+# Every lifted layer gets a single constant color property, so each renders as
+# one flat color; the actual color is the layer's active colormap (chosen in the
+# GUI dropdown). The Tracks layer min-max normalizes the property before mapping,
+# so a constant value collapses to one color regardless of the value used.
+_COLOR_VALUE = 1.0
 
 # The four track roles the lift understands and the "error view" look each one
 # takes on toggle-on (all reverted on toggle-off). Matches the original
 # Divisualisation renderer: GT -> Greens, predicted -> Wistia, edge errors ->
-# cool with a doubled tail width. ``colormap`` is a matplotlib/vispy name;
-# ``color_value`` is where that colormap is sampled for the flat edge color.
+# cool with a doubled tail width. ``colormap`` is a matplotlib/vispy name.
 ROLES = ("gt", "pred", "fn_edges", "fp_edges")
 ROLE_DISPLAY: dict[str, dict] = {
-    "gt": {"colormap": "Greens", "width_factor": 1, "color_value": _MID_COLOR_VALUE},
-    "pred": {"colormap": "Wistia", "width_factor": 1, "color_value": _MID_COLOR_VALUE},
+    "gt": {"colormap": "Greens", "width_factor": 1},
+    "pred": {"colormap": "Wistia", "width_factor": 1},
     "fn_edges": {
         "colormap": "cool",
         "width_factor": 2,
-        "color_value": ERROR_COLOR_VALUE,
     },
     "fp_edges": {
         "colormap": "cool",
         "width_factor": 2,
-        "color_value": ERROR_COLOR_VALUE,
     },
 }
 # Shared look applied to every lifted track layer regardless of role.
@@ -298,22 +293,14 @@ class SpacetimeLift:
         layer.tail_width = _BASE_TAIL_WIDTH
 
     @staticmethod
-    def _apply_colormap(
-        layer, colormap, key, value=_MID_COLOR_VALUE, noise_std=COLOR_NOISE_STD
-    ):
-        """Color a lifted track layer with ``colormap`` via a (near-)constant
-        property stored under ``key``, sampled at ``value``. ``noise_std`` adds a
-        small Gaussian jitter per point. Prior coloring is already snapshotted so
-        toggle-off restores it.
+    def _apply_colormap(layer, colormap, key):
+        """Color a lifted track layer flat with ``colormap`` via a constant
+        property (all edges = ``_COLOR_VALUE``) stored under ``key``. Prior
+        coloring is already snapshotted so toggle-off restores it.
         """
-        prop = np.full(len(layer.data), value, dtype=float)
-        if noise_std:
-            prop = prop + np.random.default_rng().normal(
-                0.0, noise_std, size=prop.shape
-            )
         layer.properties = {
             **dict(layer.properties),
-            key: prop,
+            key: np.full(len(layer.data), _COLOR_VALUE),
         }
         layer.color_by = key
         # Register the colormap by name so it is selectable, then activate it as
@@ -332,9 +319,7 @@ class SpacetimeLift:
         if spec is None:
             return
         self._apply_common_display(layer)
-        self._apply_colormap(
-            layer, spec["colormap"], f"_lift_{role}", spec["color_value"]
-        )
+        self._apply_colormap(layer, spec["colormap"], f"_lift_{role}")
         # Error roles get a wider tail than the shared base.
         layer.tail_width = _BASE_TAIL_WIDTH * spec["width_factor"]
 

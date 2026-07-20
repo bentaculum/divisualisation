@@ -28,12 +28,10 @@ logger = logging.getLogger(__name__)
 # napari Tracks layer property used to drive the per-error-type colormap.
 _PROPERTY_KEY = "error"
 
-# Sample the error colormap at its vivid endpoint (0.5 is washed out).
-ERROR_COLOR_VALUE = 1.0
-
-# Tiny jitter so the color values are not all identical; a constant range
-# makes napari's colormap dropdown inert on the layer.
-COLOR_NOISE_STD = 1e-6
+# Constant value for the color property: every error edge renders as one flat
+# color (the layer's active colormap, chosen in the GUI dropdown). The Tracks
+# layer min-max normalizes the property, so a constant collapses to one color.
+_COLOR_VALUE = 1.0
 
 # CTC false negatives are missing edges, so their coordinates live in the
 # ground-truth graph. CTC false positives are spurious predicted edges, so
@@ -205,15 +203,9 @@ def add_edge_error_tracks(
             layers[flag] = None
             continue
 
-        # A near-constant colormap value renders every segment in one flat color.
-        # Sample the endpoint (not the washed-out mid-point) so the error
-        # colormap stays vivid; add a hair of jitter so the value range is not
-        # degenerate (which would make the layer's colormap dropdown inert).
-        value = np.full(len(tracks), ERROR_COLOR_VALUE, dtype=float)
-        value = value + np.random.default_rng().normal(
-            0.0, COLOR_NOISE_STD, size=value.shape
-        )
-        properties = {_PROPERTY_KEY: value}
+        # A constant colormap value renders every segment in one flat color; the
+        # actual color is the layer's active colormap (chosen in the dropdown).
+        properties = {_PROPERTY_KEY: np.full(len(tracks), _COLOR_VALUE)}
         layer = viewer.add_tracks(
             data=tracks,
             name=str(flag.value),
