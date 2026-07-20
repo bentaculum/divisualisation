@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 import napari
 import numpy as np
-from napari.utils.colormaps.colormap_utils import ensure_colormap
+from napari.utils.colormaps.colormap_utils import vispy_or_mpl_colormap
 from traccuracy import EdgeFlag, TrackingGraph
 
 if TYPE_CHECKING:
@@ -28,10 +28,15 @@ logger = logging.getLogger(__name__)
 # napari Tracks layer property used to drive the per-error-type colormap.
 _PROPERTY_KEY = "error"
 
-# Constant value for the color property: every error edge renders as one flat
-# color (the layer's active colormap, chosen in the GUI dropdown). The Tracks
-# layer min-max normalizes the property, so a constant collapses to one color.
-_COLOR_VALUE = 1.0
+# Value written to the color property per error type, matching the original
+# Divisualisation renderer (the enumerate index: false negatives 0, false
+# positives 1). Passed via colormaps_dict below, these map RAW through the
+# colormap -- the Tracks layer only 0-1 normalizes when using layer.colormap,
+# not colormaps_dict -- so 0 and 1 hit the colormap's actual endpoints.
+DEFAULT_ERROR_VALUES: dict[EdgeFlag, float] = {
+    EdgeFlag.CTC_FALSE_NEG: 0.0,
+    EdgeFlag.CTC_FALSE_POS: 1.0,
+}
 
 # CTC false negatives are missing edges, so their coordinates live in the
 # ground-truth graph. CTC false positives are spurious predicted edges, so
@@ -203,13 +208,17 @@ def add_edge_error_tracks(
             layers[flag] = None
             continue
 
-        # A constant colormap value renders every segment in one flat color; the
-        # actual color is the layer's active colormap (chosen in the dropdown).
-        properties = {_PROPERTY_KEY: np.full(len(tracks), _COLOR_VALUE)}
+        # One flat value per error type (main's enumerate index), mapped RAW via
+        # colormaps_dict so it bypasses the Tracks layer's 0-1 normalization and
+        # hits the colormap's true value (matches the original renderer).
+        value = DEFAULT_ERROR_VALUES[flag]
+        properties = {_PROPERTY_KEY: np.full(len(tracks), value)}
         layer = viewer.add_tracks(
             data=tracks,
             name=str(flag.value),
             properties=properties,
+            color_by=_PROPERTY_KEY,
+            colormaps_dict={_PROPERTY_KEY: vispy_or_mpl_colormap(colormaps[flag])},
             tail_width=tail_width,
             # Long tail so the whole error segment stays drawn, matching the
             # original Divisualisation renderer.
@@ -220,12 +229,6 @@ def add_edge_error_tracks(
             scale=None if scale is None else tuple(scale),
             translate=None if translate is None else tuple(translate),
         )
-        # Set color_by + the active colormap after construction. Use
-        # layer.colormap (what the GUI dropdown binds to), not colormaps_dict,
-        # which a Tracks layer ignores for the dropdown.
-        layer.color_by = _PROPERTY_KEY
-        ensure_colormap(colormaps[flag])
-        layer.colormap = colormaps[flag]
         layers[flag] = layer
 
     return layers

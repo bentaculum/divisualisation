@@ -105,21 +105,21 @@ def test_tail_width_is_propagated(viewer_model, graphs_2d):
     assert layers[EdgeFlag.CTC_FALSE_NEG].tail_width == 8
 
 
-def _cmap_name(cmap):
-    """layer.colormap may be a name string (ViewerModel) or a Colormap."""
-    return cmap if isinstance(cmap, str) else cmap.name
-
-
 def test_color_by_and_default_colormaps(viewer_model, graphs_2d):
     gt, pred = graphs_2d
     layers = add_edge_error_tracks(viewer_model, gt, pred)
     fn = layers[EdgeFlag.CTC_FALSE_NEG]
+    fp = layers[EdgeFlag.CTC_FALSE_POS]
     assert fn.color_by == "error"
-    # Both error types default to "cool", matching the original renderer (they
-    # are told apart by being separate named layers, not by color). The active
-    # layer.colormap (what the GUI dropdown binds to) carries it.
-    assert _cmap_name(fn.colormap) == "cool"
-    assert _cmap_name(layers[EdgeFlag.CTC_FALSE_POS].colormap) == "cool"
+    # Both error types default to "cool", passed via colormaps_dict so the value
+    # maps raw (bypassing the Tracks 0-1 normalization), matching the original
+    # renderer. Values are the enumerate index: FN 0, FP 1.
+    assert fn.colormaps_dict["error"].name == "cool"
+    assert fp.colormaps_dict["error"].name == "cool"
+    import numpy as np
+
+    assert np.unique(fn.properties["error"]).tolist() == [0.0]
+    assert np.unique(fp.properties["error"]).tolist() == [1.0]
 
 
 def test_colormaps_override(viewer_model, graphs_2d):
@@ -127,7 +127,7 @@ def test_colormaps_override(viewer_model, graphs_2d):
     layers = add_edge_error_tracks(
         viewer_model, gt, pred, colormaps={EdgeFlag.CTC_FALSE_NEG: "hot"}
     )
-    assert _cmap_name(layers[EdgeFlag.CTC_FALSE_NEG].colormap) == "hot"
+    assert layers[EdgeFlag.CTC_FALSE_NEG].colormaps_dict["error"].name == "hot"
 
 
 def test_custom_error_flags_subset(viewer_model, graphs_2d):

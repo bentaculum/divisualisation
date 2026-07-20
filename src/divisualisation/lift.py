@@ -13,7 +13,7 @@ from contextlib import contextmanager
 
 import napari
 import numpy as np
-from napari.utils.colormaps.colormap_utils import ensure_colormap
+from napari.utils.colormaps.colormap_utils import vispy_or_mpl_colormap
 
 logger = logging.getLogger(__name__)
 
@@ -36,12 +36,14 @@ _DEFAULT_COLOR_VALUE = 0.5
 # The four track roles the lift understands and the "error view" look each one
 # takes on toggle-on (all reverted on toggle-off). Matches the original
 # Divisualisation renderer: GT -> Greens, predicted -> Wistia, edge errors ->
-# cool with a doubled tail width. ``colormap`` is a matplotlib/vispy name.
+# cool with a doubled tail width. ``colormap`` is a matplotlib/vispy name;
+# ``color_value`` is the raw value mapped through the colormap (fn 0 / fp 1
+# match main, giving cool's cyan / magenta endpoints).
 ROLES = ("gt", "pred", "fn_edges", "fp_edges")
 ROLE_DISPLAY: dict[str, dict] = {
     "gt": {"colormap": "Greens", "width_factor": 1, "color_value": 0.5},
     "pred": {"colormap": "Wistia", "width_factor": 1, "color_value": 0.5},
-    "fn_edges": {"colormap": "cool", "width_factor": 2, "color_value": 1.0},
+    "fn_edges": {"colormap": "cool", "width_factor": 2, "color_value": 0.0},
     "fp_edges": {"colormap": "cool", "width_factor": 2, "color_value": 1.0},
 }
 # Shared look applied to every lifted track layer regardless of role.
@@ -82,10 +84,6 @@ class SpacetimeLift:
         # Remembered lifted-view camera, so toggling off then on returns to the
         # same 3D view. None until the first lift.
         self._lift_camera: dict | None = None
-        # Remembered per-layer colormap chosen while lifted (layer name ->
-        # colormap name), so re-lifting a layer restores the colormap the user
-        # picked rather than resetting to the role default.
-        self._lift_colormaps: dict[str, str] = {}
 
     @property
     def applied(self) -> bool:
@@ -202,15 +200,10 @@ class SpacetimeLift:
         # Keep the slider where it is across the toggle (restoring data resets it).
         current_time = self._viewer.dims.current_step[0]
 
-        # Remember the lifted view (camera + per-layer colormap) BEFORE restoring
-        # layers, so toggling back on returns to it. Restoring layer data changes
-        # the scene extent and makes napari re-zoom, so capturing after would
-        # corrupt the remembered zoom.
+        # Remember the lifted view camera BEFORE restoring layers, so toggling
+        # back on returns to it. Restoring layer data changes the scene extent
+        # and makes napari re-zoom, so capturing after would corrupt the zoom.
         self._lift_camera = self._camera_state()
-        for name in self._track_bases:
-            if name in self._viewer.layers:
-                cmap = self._viewer.layers[name].colormap
-                self._lift_colormaps[name] = getattr(cmap, "name", cmap)
 
         for layer in self._viewer.layers:
             snap = self._snapshots.get(layer.name)
@@ -304,21 +297,21 @@ class SpacetimeLift:
 
     @staticmethod
     def _apply_colormap(layer, colormap, key, value=_DEFAULT_COLOR_VALUE):
-        """Color a lifted track layer flat with ``colormap`` via a constant
-        property (all edges = ``value``) stored under ``key``. Prior coloring is
-        already snapshotted so toggle-off restores it.
+        """Color a lifted track layer flat: a constant property (all edges =
+        ``value``) under ``key``, mapped through ``colormap`` via colormaps_dict.
+        Using colormaps_dict maps ``value`` RAW (the Tracks layer only 0-1
+        normalizes when using layer.colormap, not colormaps_dict), matching the
+        original renderer. Prior coloring is snapshotted so revert restores it.
         """
         layer.properties = {
             **dict(layer.properties),
             key: np.full(len(layer.data), value),
         }
+        layer.colormaps_dict = {
+            **dict(layer.colormaps_dict),
+            key: vispy_or_mpl_colormap(colormap),
+        }
         layer.color_by = key
-        # Register the colormap by name so it is selectable, then activate it as
-        # the layer's colormap -- this is what the napari colormap dropdown shows
-        # and controls. (A Tracks layer ignores colormaps_dict for the dropdown,
-        # so setting it there leaves the dropdown inert.)
-        ensure_colormap(colormap)
-        layer.colormap = colormap
 
     def _apply_display(self, layer, role):
         """Give a lifted track layer the "error view" look for its role.
@@ -329,10 +322,9 @@ class SpacetimeLift:
         if spec is None:
             return
         self._apply_common_display(layer)
-        # Restore the colormap the user last chose for this layer while lifted,
-        # falling back to the role default on the first lift.
-        colormap = self._lift_colormaps.get(layer.name, spec["colormap"])
-        self._apply_colormap(layer, colormap, f"_lift_{role}", spec["color_value"])
+        self._apply_colormap(
+            layer, spec["colormap"], f"_lift_{role}", spec["color_value"]
+        )
         # Error roles get a wider tail than the shared base.
         layer.tail_width = _BASE_TAIL_WIDTH * spec["width_factor"]
 
