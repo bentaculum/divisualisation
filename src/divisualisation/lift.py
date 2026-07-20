@@ -189,7 +189,7 @@ class SpacetimeLift:
             self._refold_tracks()
             self._update_sweep()
 
-    def apply(self, layer_roles):
+    def apply(self, layer_roles, extra_layers=()):
         """Lift the declared track layers; sweep-clip image/labels; go 3D.
 
         Args:
@@ -200,6 +200,10 @@ class SpacetimeLift:
                 width / blending / opacity), keeping each layer's own coloring.
                 Prior display settings are snapshotted and restored on revert.
                 All roles are optional; unknown or missing names are skipped.
+            extra_layers: Additional tracks-layer names to lift with the shared
+                look only (own coloring), on top of ``layer_roles``. Lets the
+                error workflow lift every tracks layer -- role layers get the
+                error-view colors, the rest keep their own.
 
         Idempotent: calling apply while already applied is a no-op.
         """
@@ -210,6 +214,9 @@ class SpacetimeLift:
             name_to_role = {name: role for role, name in layer_roles.items() if name}
         else:
             name_to_role = {name: None for name in layer_roles}
+        # Extra layers lift with own coloring (role None), unless already a role.
+        for name in extra_layers:
+            name_to_role.setdefault(name, None)
 
         # Capture the current timepoint BEFORE mutating: lifting layer data
         # resets it, and we want the slider to stay put across the toggle.

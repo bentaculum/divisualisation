@@ -142,7 +142,10 @@ class SpacetimeWidget(Container):
                 e.revert()
         self._lift = engine
         engine.time_scale = self._lift_amount.value
-        engine.apply(target)
+        # Always lift EVERY tracks layer. In the errors workflow ``target`` is a
+        # role mapping (those get error-view colors); every other tracks layer
+        # (incl. hidden, non-role ones) is lifted too, keeping its own coloring.
+        engine.apply(target, extra_layers=self._all_tracks_target())
         self._update_error_controls_visibility()
 
     def _revert_lift(self):

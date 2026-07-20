@@ -288,5 +288,37 @@ def test_role_reassign_dedups_and_lifts_all(make_napari_viewer):
     roles = w._roles_target()
     for name in roles.values():
         assert viewer.layers[name].data.shape[1] == 5  # lifted
-    # The layer dropped from all roles is un-lifted (flat) again.
-    assert viewer.layers["GT tracks"].data.shape[1] == 4
+    # Every tracks layer lifts in the Divisualisation view; a layer dropped from
+    # all roles stays lifted but reverts to its own coloring (no role color).
+    gt = viewer.layers["GT tracks"]
+    assert gt.data.shape[1] == 5
+    assert gt.color_by == "track_id"
+
+
+def test_divisualisation_lifts_all_tracks_incl_non_role(make_napari_viewer):
+    import numpy as np
+
+    from divisualisation._widget import SpacetimeWidget
+
+    viewer = make_napari_viewer()
+    viewer.add_image(np.zeros((6, 20, 20)), name="raw")
+    viewer.add_tracks(
+        np.array([[1, t, 5, 5] for t in range(6)], float), name="GT tracks"
+    )
+    extra = viewer.add_tracks(
+        np.array([[2, t, 9, 9] for t in range(6)], float), name="extra tracks"
+    )
+    extra.visible = False  # hidden, and not a named role
+
+    w = SpacetimeWidget(viewer)
+    w._lift_errors.value = True  # Divisualisation workflow
+
+    # Role layer lifts with error-view color.
+    assert viewer.layers["GT tracks"].color_by == "_lift_gt"
+    # The hidden, non-role tracks layer is lifted too, keeping its own coloring.
+    ex = viewer.layers["extra tracks"]
+    assert ex.data.shape[1] == 5
+    assert ex.color_by == "track_id"
+    # Still lifted after being shown.
+    ex.visible = True
+    assert viewer.layers["extra tracks"].data.shape[1] == 5
