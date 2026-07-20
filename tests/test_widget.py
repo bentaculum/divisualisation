@@ -42,7 +42,7 @@ def test_lift_all_widget_lifts_all_tracks(make_napari_viewer):
     for name in ("tracks a", "tracks b"):
         layer = viewer.layers[name]
         assert layer.data.shape[1] == 5
-        np.testing.assert_allclose(layer.data[:, 2], 15 * layer.data[:, 1])
+        np.testing.assert_allclose(layer.data[:, 2], -15 * layer.data[:, 1])
         assert layer.color_by == "track_id"  # own coloring kept
     assert viewer.dims.ndisplay == 3
 
@@ -67,8 +67,8 @@ def test_lift_all_widget_sync_matches_main(make_napari_viewer):
     viewer.dims.set_current_step(0, 3)
     # Verbatim main coupling: clip at t*scale=30, translate -t*scale=-30.
     enabled = [p for p in layer.experimental_clipping_planes if p.enabled]
-    assert enabled and enabled[0].position[0] == pytest.approx(30)
-    assert list(layer.translate) == pytest.approx([0, -30, 0, 0])
+    assert enabled and enabled[0].position[0] == pytest.approx(-30)
+    assert list(layer.translate) == pytest.approx([0, 30, 0, 0])
 
 
 def test_errors_widget_applies_role_look(make_napari_viewer):

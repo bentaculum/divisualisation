@@ -24,7 +24,7 @@ def test_apply_lifts_tracks_to_five_columns(viewer_with_layers):
     tracks = v.layers["tracks"].data
     assert tracks.shape[1] == 5
     # z == time_scale * t
-    np.testing.assert_allclose(tracks[:, 2], 10 * tracks[:, 1])
+    np.testing.assert_allclose(tracks[:, 2], -10 * tracks[:, 1])
     assert v.dims.ndisplay == 3
 
 
@@ -67,7 +67,7 @@ def test_time_scale_slider_refolds_live(viewer_with_layers):
     lift.apply(["tracks"])
     lift.time_scale = 25
     tracks = v.layers["tracks"].data
-    np.testing.assert_allclose(tracks[:, 2], 25 * tracks[:, 1])
+    np.testing.assert_allclose(tracks[:, 2], -25 * tracks[:, 1])
 
 
 def test_deselected_tracks_stay_flat(viewer_with_layers):
@@ -105,13 +105,13 @@ def test_sweep_callback_updates_on_time_change(viewer_with_layers):
     planes = layer.experimental_clipping_planes
     # Verbatim main coupling: clip at t*time_scale=20, translate -t*scale=-20.
     enabled = [p for p in planes if p.enabled]
-    assert enabled and enabled[0].position[0] == pytest.approx(20)
-    assert list(layer.translate) == pytest.approx([0, -20, 0, 0])
+    assert enabled and enabled[0].position[0] == pytest.approx(-20)
+    assert list(layer.translate) == pytest.approx([0, 20, 0, 0])
 
 
 def test_lift_preserves_real_z_for_3d_tracks():
     # 3D tracks already have a real z; lifting adds the time offset on top of it
-    # (matching the original Divisualisation: z = z_real + time_scale * t).
+    # (matching the original Divisualisation: z = z_real - time_scale * t).
     v = ViewerModel()
     v.add_image(np.random.rand(3, 2, 8, 8), name="vol")  # t, z, y, x
     v.add_tracks(
@@ -120,8 +120,8 @@ def test_lift_preserves_real_z_for_3d_tracks():
     )
     lift = SpacetimeLift(v, time_scale=5)
     lift.apply(["tracks"])
-    # z_real=4, time_scale=5 -> [4, 9, 14]
-    np.testing.assert_allclose(v.layers["tracks"].data[:, 2], [4, 9, 14])
+    # z_real=4, time_scale=5, t=[0,1,2] -> 4 - 5*t = [4, -1, -6]
+    np.testing.assert_allclose(v.layers["tracks"].data[:, 2], [4, -1, -6])
     assert v.layers["tracks"].data.shape[1] == 5  # stays 5-col
 
     lift.revert()

@@ -182,7 +182,7 @@ class SpacetimeLift:
             # lifted cone's height, keeping the framed y/x.
             n_timepoints = self._viewer.dims.nsteps[0]
             center = list(self._viewer.camera.center)
-            center[0] = -0.5 * self._time_scale * n_timepoints
+            center[0] = 0.5 * self._time_scale * n_timepoints
             self._viewer.camera.center = center
         # Restore the timepoint (reset_view / data changes reset it); this also
         # drives _update_sweep to the right slice via the point event. Set only
@@ -355,9 +355,10 @@ class SpacetimeLift:
 
     def _folded(self, base: np.ndarray) -> np.ndarray:
         data = base.copy()
-        # z <- z + time_scale * t, so tracks rise out of the plane over time
-        # while preserving any real z (matches the original Divisualisation).
-        data[:, 2] = base[:, 2] + self._time_scale * base[:, 1]
+        # z <- z - time_scale * t, so tracks rise out of the plane over time.
+        # The depth axis points towards the viewer since napari 0.6, so the time
+        # term is subtracted to lift upward. Preserves any real z.
+        data[:, 2] = base[:, 2] - self._time_scale * base[:, 1]
         return data
 
     def _refold_tracks(self):
@@ -393,18 +394,18 @@ class SpacetimeLift:
     def _update_sweep(self, event=None):
         """Sync each lifted tracks layer to the current timepoint.
 
-        Verbatim port of the original Divisualisation renderer: clip the tracks
-        at ``t * time_scale`` along the folded-time (z) axis and translate them
-        by ``-t * time_scale`` there, so the current timepoint's slice lands on
-        the fixed image plane and later frames recede above it as you scrub.
-        Image/labels planes are left untouched.
+        Clip the tracks at ``-t * time_scale`` along the folded-time (z) axis
+        and translate them by ``+t * time_scale`` there, so the current
+        timepoint's slice lands on the fixed image plane and later frames recede
+        above it as you scrub. Signs follow the fold (``z = z - time_scale * t``,
+        upward under napari 0.6+ axis directions). Image/labels are untouched.
         """
         t = self._viewer.dims.point[0]
         clipping_planes = [
             {"position": (0, 0, 0), "normal": (0, 0, 0), "enabled": False},
             {
-                "position": (t * self._time_scale, 0, 0),
-                "normal": (-1, 0, 0),
+                "position": (-t * self._time_scale, 0, 0),
+                "normal": (1, 0, 0),
                 "enabled": True,
             },
         ]
@@ -413,7 +414,7 @@ class SpacetimeLift:
                 continue  # layer removed (e.g. viewer teardown); skip
             layer = self._viewer.layers[name]
             layer.experimental_clipping_planes = clipping_planes
-            layer.translate = [0, -self._time_scale * t, 0, 0]
+            layer.translate = [0, self._time_scale * t, 0, 0]
 
 
 def _is_tracks(layer) -> bool:
