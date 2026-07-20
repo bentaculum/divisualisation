@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 import napari
 import numpy as np
-from napari.utils.colormaps.colormap_utils import vispy_or_mpl_colormap
+from napari.utils.colormaps.colormap_utils import ensure_colormap
 from traccuracy import EdgeFlag, TrackingGraph
 
 if TYPE_CHECKING:
@@ -30,6 +30,10 @@ _PROPERTY_KEY = "error"
 
 # Sample the error colormap at its vivid endpoint (0.5 is washed out).
 ERROR_COLOR_VALUE = 1.0
+
+# Tiny jitter so the color values are not all identical; a constant range
+# makes napari's colormap dropdown inert on the layer.
+COLOR_NOISE_STD = 1e-6
 
 # CTC false negatives are missing edges, so their coordinates live in the
 # ground-truth graph. CTC false positives are spurious predicted edges, so
@@ -201,15 +205,19 @@ def add_edge_error_tracks(
             layers[flag] = None
             continue
 
-        # A constant colormap value renders every segment in one flat color.
+        # A near-constant colormap value renders every segment in one flat color.
         # Sample the endpoint (not the washed-out mid-point) so the error
-        # colormap stays vivid.
-        properties = {_PROPERTY_KEY: np.full(len(tracks), ERROR_COLOR_VALUE)}
+        # colormap stays vivid; add a hair of jitter so the value range is not
+        # degenerate (which would make the layer's colormap dropdown inert).
+        value = np.full(len(tracks), ERROR_COLOR_VALUE, dtype=float)
+        value = value + np.random.default_rng().normal(
+            0.0, COLOR_NOISE_STD, size=value.shape
+        )
+        properties = {_PROPERTY_KEY: value}
         layer = viewer.add_tracks(
             data=tracks,
             name=str(flag.value),
             properties=properties,
-            colormaps_dict={_PROPERTY_KEY: vispy_or_mpl_colormap(colormaps[flag])},
             tail_width=tail_width,
             # Long tail so the whole error segment stays drawn, matching the
             # original Divisualisation renderer.
@@ -220,9 +228,12 @@ def add_edge_error_tracks(
             scale=None if scale is None else tuple(scale),
             translate=None if translate is None else tuple(translate),
         )
-        # Set color_by after construction to avoid a transient napari warning
-        # about the feature not being present yet during __init__.
+        # Set color_by + the active colormap after construction. Use
+        # layer.colormap (what the GUI dropdown binds to), not colormaps_dict,
+        # which a Tracks layer ignores for the dropdown.
         layer.color_by = _PROPERTY_KEY
+        ensure_colormap(colormaps[flag])
+        layer.colormap = colormaps[flag]
         layers[flag] = layer
 
     return layers

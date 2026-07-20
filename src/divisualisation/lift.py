@@ -15,7 +15,7 @@ import napari
 import numpy as np
 from napari.utils.colormaps.colormap_utils import ensure_colormap
 
-from .errors import ERROR_COLOR_VALUE
+from .errors import COLOR_NOISE_STD, ERROR_COLOR_VALUE
 
 logger = logging.getLogger(__name__)
 
@@ -33,10 +33,6 @@ def _clipping_planes(cut_at: float):
 # the error map ("cool") looks washed out at 0.5, so error edges use the vivid
 # endpoint (ERROR_COLOR_VALUE, imported from errors) instead.
 _MID_COLOR_VALUE = 0.5
-# Tiny Gaussian jitter added to the GT edges' colormap value so they are not a
-# single flat value (makes the GT layer's colormap dropdown span a hair of range
-# rather than collapsing to one point).
-_GT_COLOR_NOISE_STD = 1e-3
 
 # The four track roles the lift understands and the "error view" look each one
 # takes on toggle-on (all reverted on toggle-off). Matches the original
@@ -45,12 +41,7 @@ _GT_COLOR_NOISE_STD = 1e-3
 # ``color_value`` is where that colormap is sampled for the flat edge color.
 ROLES = ("gt", "pred", "fn_edges", "fp_edges")
 ROLE_DISPLAY: dict[str, dict] = {
-    "gt": {
-        "colormap": "Greens",
-        "width_factor": 1,
-        "color_value": _MID_COLOR_VALUE,
-        "noise_std": _GT_COLOR_NOISE_STD,
-    },
+    "gt": {"colormap": "Greens", "width_factor": 1, "color_value": _MID_COLOR_VALUE},
     "pred": {"colormap": "Wistia", "width_factor": 1, "color_value": _MID_COLOR_VALUE},
     "fn_edges": {
         "colormap": "cool",
@@ -307,7 +298,9 @@ class SpacetimeLift:
         layer.tail_width = _BASE_TAIL_WIDTH
 
     @staticmethod
-    def _apply_colormap(layer, colormap, key, value=_MID_COLOR_VALUE, noise_std=0.0):
+    def _apply_colormap(
+        layer, colormap, key, value=_MID_COLOR_VALUE, noise_std=COLOR_NOISE_STD
+    ):
         """Color a lifted track layer with ``colormap`` via a (near-)constant
         property stored under ``key``, sampled at ``value``. ``noise_std`` adds a
         small Gaussian jitter per point. Prior coloring is already snapshotted so
@@ -340,11 +333,7 @@ class SpacetimeLift:
             return
         self._apply_common_display(layer)
         self._apply_colormap(
-            layer,
-            spec["colormap"],
-            f"_lift_{role}",
-            spec["color_value"],
-            spec.get("noise_std", 0.0),
+            layer, spec["colormap"], f"_lift_{role}", spec["color_value"]
         )
         # Error roles get a wider tail than the shared base.
         layer.tail_width = _BASE_TAIL_WIDTH * spec["width_factor"]
