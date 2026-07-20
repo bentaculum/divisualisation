@@ -16,7 +16,7 @@ import napari
 from magicgui.backends._qtpy.widgets import QBaseValueWidget
 from magicgui.widgets import ComboBox, Container, FloatSlider, PushButton
 from magicgui.widgets.bases import ValueWidget
-from qtpy.QtCore import QTimer
+from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
 from superqt import QToggleSwitch
 
 from .lift import ROLES, SpacetimeLift, _is_tracks

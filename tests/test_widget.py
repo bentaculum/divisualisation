@@ -174,11 +174,11 @@ def test_role_change_relifts_live(make_napari_viewer):
 
     # Dropdowns are editable while the Divisualisation toggle is on.
     assert w._role_combos["gt"].enabled
-    assert "GT tracks" in w._lift._track_bases
+    assert viewer.layers["GT tracks"] in w._lift._track_bases
 
     # Changing the GT role re-applies the lift with the new selection.
     w._role_combos["gt"].value = "other tracks"
-    assert "other tracks" in w._lift._track_bases
+    assert viewer.layers["other tracks"] in w._lift._track_bases
     assert w._lift.applied
 
 
@@ -217,16 +217,16 @@ def test_compute_during_lift_reapplies_and_keeps_dropdowns(
 
     w = SpacetimeWidget(viewer)
     w._lift_errors.value = True  # lift GT/pred
-    assert "GT tracks" in w._lift._track_bases
+    assert viewer.layers["GT tracks"] in w._lift._track_bases
 
     w._on_compute()  # compute (stubbed) while lifted
 
     # GT/pred stay lifted; the new error layers are lifted + role-colored.
     for nm in ("GT tracks", "predicted tracks"):
-        assert nm in w._lift._track_bases
+        assert viewer.layers[nm] in w._lift._track_bases
         assert viewer.layers[nm].data.shape[1] == 5
     fn = str(EdgeFlag.CTC_FALSE_NEG.value)
-    assert fn in w._lift._track_bases
+    assert viewer.layers[fn] in w._lift._track_bases
     assert viewer.layers[fn].color_by == "_lift_fn_edges"
     # Dropdowns still work and include the new error layers.
     assert fn in w._role_combos["fn_edges"].choices

@@ -138,11 +138,13 @@ class SpacetimeLift:
         self._viewer = viewer
         self._time_scale = time_scale
         self._applied = False
-        self._snapshots: dict[str, dict] = {}
+        # Internal state keyed by the LAYER OBJECT (not its name, which the
+        # user can change): renaming a lifted layer must not strand it.
+        self._snapshots: dict = {}
         self._viewer_snapshot: dict = {}
         # 5-column base tracks (z zeroed) per lifted layer, so changing the lift
         # amount is a cheap recompute from the original time column.
-        self._track_bases: dict[str, np.ndarray] = {}
+        self._track_bases: dict = {}
         # Remembered lifted-view camera. Held in a shared dict so several lift
         # instances (e.g. the two plugin toggles) share ONE camera across views;
         # toggling off then on returns to the same 3D view. Pass the same
@@ -152,7 +154,10 @@ class SpacetimeLift:
         # value}), so tweaks made while lifted (e.g. a wider tail) persist across
         # toggling the lift off and on. Per-instance (NOT shared), so each view
         # keeps its own layer-control settings.
-        self._lift_display: dict[str, dict] = {}
+        self._lift_display: dict = {}
+        # Layer objects whose ``visible`` event we connected on apply; held so we
+        # can disconnect on revert even if a layer was removed from the viewer.
+        self._visible_connected: list = []
 
     @property
     def applied(self) -> bool:
@@ -227,7 +232,7 @@ class SpacetimeLift:
         current_time = self._viewer.dims.current_step[0]
 
         for layer in self._viewer.layers:
-            self._snapshots[layer.name] = self._snapshot_layer(layer)
+            self._snapshots[layer] = self._snapshot_layer(layer)
 
         # Mutate all layers to a consistent ndim before any render, so napari
         # never draws a mix of 3-ndim and 4-ndim layers (which raises an
@@ -277,15 +282,16 @@ class SpacetimeLift:
         # A layer hidden at lift time doesn't get its lifted transform pushed to
         # the GPU; when later shown it would render at a stale position. Re-sync
         # it on show.
-        for name in self._track_bases:
-            if name in self._viewer.layers:
-                self._viewer.layers[name].events.visible.connect(self._on_layer_visible)
+        self._visible_connected = []
+        for layer in self._track_bases:
+            layer.events.visible.connect(self._on_layer_visible)
+            self._visible_connected.append(layer)
 
     def _on_layer_visible(self, event):
         if not self._applied:
             return
         layer = event.source
-        if getattr(layer, "visible", False) and layer.name in self._track_bases:
+        if getattr(layer, "visible", False) and layer in self._track_bases:
             # Re-apply the current sweep to this layer and force a redraw so the
             # freshly shown layer picks up its lifted transform.
             self._update_sweep()
@@ -297,11 +303,9 @@ class SpacetimeLift:
             return
         # Disconnect before restoring so the callbacks cannot fire mid-revert.
         self._viewer.dims.events.point.disconnect(self._update_sweep)
-        for name in self._track_bases:
-            if name in self._viewer.layers:
-                self._viewer.layers[name].events.visible.disconnect(
-                    self._on_layer_visible
-                )
+        for layer in self._visible_connected:
+            layer.events.visible.disconnect(self._on_layer_visible)
+        self._visible_connected = []
 
         # Keep the slider where it is across the toggle (restoring data resets it).
         current_time = self._viewer.dims.current_step[0]
@@ -313,10 +317,8 @@ class SpacetimeLift:
         self._lift_camera = self._camera_state()
         self._capture_lift_display()
 
-        for layer in self._viewer.layers:
-            snap = self._snapshots.get(layer.name)
-            if snap is not None:
-                self._restore_layer(layer, snap)
+        for layer, snap in self._snapshots.items():
+            self._restore_layer(layer, snap)
 
         self._viewer.dims.ndisplay = self._viewer_snapshot["ndisplay"]
         self._set_camera_state(self._viewer_snapshot["camera"])
@@ -348,6 +350,7 @@ class SpacetimeLift:
             snap["display"] = {a: getattr(layer, a) for a in _display_attrs(layer)}
             snap["color"] = {
                 "colormap": layer.colormap,
+                "colormaps_dict": dict(layer.colormaps_dict),
                 "color_by": layer.color_by,
                 "properties": {k: v.copy() for k, v in layer.properties.items()},
             }
@@ -370,10 +373,15 @@ class SpacetimeLift:
             if color["color_by"] in layer.properties or not layer.properties:
                 layer.color_by = color["color_by"]
             layer.colormap = color["colormap"]
+            layer.colormaps_dict = color["colormaps_dict"]  # drops _lift_* entries
         display = snap.get("display")
         if display is not None:
             for attr, value in display.items():
-                setattr(layer, attr, value)
+                try:
+                    setattr(layer, attr, value)
+                except (AttributeError, ValueError):
+                    # A napari emitter that isn't a writable property; skip it.
+                    pass
         layer.scale = snap["scale"]
         layer.translate = snap["translate"]
         layer.experimental_clipping_planes = snap["clipping_planes"]
@@ -443,28 +451,26 @@ class SpacetimeLift:
         """Overlay this layer's remembered lifted-view display params (if any)
         onto the freshly applied role/common look.
         """
-        for attr, value in self._lift_display.get(layer.name, {}).items():
+        for attr, value in self._lift_display.get(layer, {}).items():
             setattr(layer, attr, value)
 
     def _capture_lift_display(self):
         """Remember each lifted layer's current display params, so re-lifting
         restores them (independent of the layer's non-lifted settings).
         """
-        for name in self._track_bases:
-            if name in self._viewer.layers:
-                layer = self._viewer.layers[name]
-                self._lift_display[name] = {
-                    a: getattr(layer, a) for a in _display_attrs(layer)
-                }
+        for layer in self._track_bases:
+            self._lift_display[layer] = {
+                a: getattr(layer, a) for a in _display_attrs(layer)
+            }
 
     # --- transforms ---------------------------------------------------------
 
     def _lift_tracks_layer(self, layer):
         """Fold time into z for one tracks layer, matching the original render."""
-        if layer.name in self._track_bases:
+        if layer in self._track_bases:
             # Already lifted (its live data is folded): re-fold from the stored
             # flat base rather than the current data, so we never double-fold.
-            base = self._track_bases[layer.name]
+            base = self._track_bases[layer]
         else:
             data = np.asarray(layer.data, dtype=float)
             if data.shape[1] == 4:
@@ -474,7 +480,7 @@ class SpacetimeLift:
             else:
                 # 3D + t: keep the real z; lifting adds the time offset on top.
                 base = data.copy()
-            self._track_bases[layer.name] = base
+            self._track_bases[layer] = base
         # Reassigning .data resets the layer's graph and properties; restore both
         # so division/lineage edges keep drawing and per-detection properties
         # (e.g. segmentation_id, used to compute errors) survive the lift.
@@ -501,8 +507,7 @@ class SpacetimeLift:
         # Re-folding reassigns layer.data, which resets the layer's graph AND
         # its coloring (properties / color_by / colormap). Preserve and restore
         # them so changing the lift amount doesn't drop the error-view colors.
-        for name, base in self._track_bases.items():
-            layer = self._viewer.layers[name]
+        for layer, base in self._track_bases.items():
             graph = dict(layer.graph)
             properties = {k: v.copy() for k, v in layer.properties.items()}
             color_by = layer.color_by
@@ -555,10 +560,7 @@ class SpacetimeLift:
                 "enabled": True,
             },
         ]
-        for name in self._track_bases:
-            if name not in self._viewer.layers:
-                continue  # layer removed (e.g. viewer teardown); skip
-            layer = self._viewer.layers[name]
+        for layer in self._track_bases:
             layer.experimental_clipping_planes = clipping_planes
             layer.translate = [0, self._time_scale * t, 0, 0]
 

@@ -211,8 +211,8 @@ def add_edge_error_tracks(
         # One flat value per error type (main's enumerate index), mapped RAW via
         # colormaps_dict so it bypasses the Tracks layer's 0-1 normalization and
         # hits the colormap's true value (matches the original renderer).
-        value = DEFAULT_ERROR_VALUES[flag]
-        properties = {_PROPERTY_KEY: np.full(len(tracks), value)}
+        error_value = DEFAULT_ERROR_VALUES[flag]
+        properties = {_PROPERTY_KEY: np.full(len(tracks), error_value)}
         layer = viewer.add_tracks(
             data=tracks,
             name=str(flag.value),
