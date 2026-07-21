@@ -90,8 +90,12 @@ if "gt" not in locals():
 
     matched_path = "3d_matched.pkl"
     try:
-        ctc_matched = pickle.load(open(matched_path, "rb"))
-    except FileNotFoundError:
+        with open(matched_path, "rb") as f:
+            ctc_matched = pickle.load(f)
+    except Exception as exc:
+        # Missing cache, or a stale pickle from a different traccuracy version
+        # (e.g. an enum member that no longer exists) -- recompute and rewrite.
+        logging.info("Recomputing CTC matching (cache unusable: %s)", exc)
         ctc_results, ctc_matched = run_metrics(
             gt_data=gt,
             pred_data=pred,
@@ -99,7 +103,8 @@ if "gt" not in locals():
             metrics=[CTCMetrics()],
         )
         pp.pprint(ctc_results)
-        pickle.dump(ctc_matched, open(matched_path, "wb"))
+        with open(matched_path, "wb") as f:
+            pickle.dump(ctc_matched, f)
 
     gt_graph = ctc_matched.gt_graph
     pred_graph = ctc_matched.pred_graph
