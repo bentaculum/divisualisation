@@ -8,15 +8,17 @@ workflows via two toggle switches sharing one lift-amount slider:
 - **Divisualisation**: declare the GT / predicted / FN-edge / FP-edge tracks
   layers by role (name-guessed), optionally compute the CTC edge errors from the
   GT/pred tracks + segmentation labels, and lift with the error-view look. Only
-  the layers picked in the role / labels dropdowns stay visible (the predicted
-  tracks are hidden by default too); every other layer is hidden while lifted
-  and restored on toggle-off.
+  the tracks layers picked in the role dropdowns stay visible (the predicted
+  tracks are hidden by default too); every other TRACKS layer is hidden while
+  lifted and restored on toggle-off. Image / labels layers are left untouched.
 
 The role / labels dropdowns and Compute button are always shown, even before the
 Divisualisation toggle is on, so layers can be picked up front.
 
 Additive: the functional API works without it.
 """
+
+from contextlib import contextmanager
 
 import napari
 from magicgui.backends._qtpy.widgets import QBaseValueWidget
@@ -78,13 +80,19 @@ class SpacetimeWidget(Container):
         self._lift_errors = ToggleSwitch(value=False, label="Divisualisation")
         self._lift_amount = FloatSlider(value=12, min=0, max=99, label="lift")
 
-        # Error-view controls (shown only while the errors toggle is on).
+        # Error-view controls. Choices are CALLABLES (not static lists): napari's
+        # add_dock_widget auto-connects layer inserted/removed/reordered/renamed
+        # to each magicgui widget's reset_choices, which re-derives choices from
+        # these callables. So the option lists stay correct on any layer change,
+        # and a selection is preserved as long as its layer still exists -- which
+        # is exactly what we want. (A static list would instead be wiped back to
+        # just "—" on every layer event, emptying the dropdowns.)
         self._role_combos = {
-            role: ComboBox(label=_ROLE_LABELS[role], choices=[_NONE_CHOICE])
+            role: ComboBox(label=_ROLE_LABELS[role], choices=self._track_choices)
             for role in ROLES
         }
-        self._gt_labels = ComboBox(label="GT labels", choices=[_NONE_CHOICE])
-        self._pred_labels = ComboBox(label="pred labels", choices=[_NONE_CHOICE])
+        self._gt_labels = ComboBox(label="GT labels", choices=self._label_choices)
+        self._pred_labels = ComboBox(label="pred labels", choices=self._label_choices)
         self._compute_btn = PushButton(text="Compute errors")
         self._error_controls = [
             *self._role_combos.values(),
@@ -96,6 +104,11 @@ class SpacetimeWidget(Container):
         # Guard so programmatic combo updates (name-guessing) don't trigger the
         # re-lift handler.
         self._refreshing = False
+        # Layers are auto-guessed into roles ONCE, when the widget first sees
+        # them. After that the dropdowns are the user's to drive: later layer
+        # inserts/removals only refresh the choice lists, never re-guess or
+        # disturb an existing selection.
+        self._guessed = False
 
         self._lift_all.changed.connect(self._on_toggle_all)
         self._lift_errors.changed.connect(self._on_toggle_errors)
@@ -113,13 +126,16 @@ class SpacetimeWidget(Container):
             *self._error_controls,
         ])
 
-        self._viewer.layers.events.inserted.connect(self._refresh_choices)
-        self._viewer.layers.events.removed.connect(self._refresh_choices)
-        self._refresh_choices()
+        # napari's add_dock_widget keeps the choice LISTS in sync (via the
+        # auto-connected reset_choices). We only need to fire the one-time
+        # auto-guess when layers first appear -- it's a no-op once guessed and
+        # never disturbs a selection thereafter.
+        self._viewer.layers.events.inserted.connect(self._guess_once)
         self._show_error_controls()
-        # add_dock_widget resets combo values right after __init__; re-guess on
-        # the next event-loop tick so the dropdowns are usable immediately.
-        QTimer.singleShot(0, self._refresh_choices)
+        # Defer the initial guess to the next event-loop tick: add_dock_widget
+        # resets combo values right after __init__, so guessing synchronously
+        # here would be clobbered.
+        QTimer.singleShot(0, self._guess_once)
 
     # --- toggles ------------------------------------------------------------
 
@@ -154,12 +170,13 @@ class SpacetimeWidget(Container):
         return selected
 
     def _hide_unselected(self):
-        """Hide every layer not picked in a dropdown, remembering prior
+        """Hide every TRACKS layer not picked in a dropdown, remembering prior
         visibility so toggle-off can restore it.
 
-        The predicted-tracks layer is hidden even when it fills the ``pred``
-        role: its errors are shown by the FN/FP overlays, so the error view
-        defaults to hiding it.
+        Non-tracks layers (images, labels) are left untouched -- the error view
+        only manages which tracks are shown. The predicted-tracks layer is
+        hidden even when it fills the ``pred`` role: its errors are shown by the
+        FN/FP overlays, so the error view defaults to hiding it.
         """
         keep = self._selected_layer_names()
         pred = self._role_combos["pred"].value
@@ -170,6 +187,8 @@ class SpacetimeWidget(Container):
         if not hasattr(self, "_prior_visible") or self._prior_visible is None:
             self._prior_visible = {}
         for layer in self._viewer.layers:
+            if not _is_tracks(layer):
+                continue  # never hide image / labels layers
             if layer.name in keep:
                 # A previously hidden layer that is now selected: show it and
                 # forget its snapshot so we don't re-hide/restore it wrongly.
@@ -211,15 +230,40 @@ class SpacetimeWidget(Container):
         for e in (self._lift_all_engine, self._lift_errors_engine):
             if e.applied:
                 e.revert()
-        self._refresh_choices()
 
     def _on_lift_amount(self, *_):
         for e in (self._lift_all_engine, self._lift_errors_engine):
             e.time_scale = self._lift_amount.value
 
+    @contextmanager
+    def _suspend_role_events(self):
+        # Suppress the _on_role_changed handler while we programmatically set
+        # combo choices/values.
+        #
+        # We do two things. (1) Block each combo's ``changed`` signal at the
+        # source, so setting .choices (which transiently resets the value) or
+        # .value emits nothing -- a flag alone is not enough because the signal
+        # can be delivered asynchronously, after the flag is cleared, and then
+        # leak into _on_role_changed and wipe selections. (2) Also raise the
+        # _refreshing flag and save/restore it (rather than force it False) so
+        # nested suspensions -- e.g. a layer-insert refresh firing while another
+        # is mid-flight -- don't unguard the outer one.
+        combos = [*self._role_combos.values(), self._gt_labels, self._pred_labels]
+        prev = self._refreshing
+        self._refreshing = True
+        blockers = [c.changed.blocked() for c in combos]
+        for b in blockers:
+            b.__enter__()
+        try:
+            yield
+        finally:
+            for b in blockers:
+                b.__exit__(None, None, None)
+            self._refreshing = prev
+
     def _on_role_changed(self, changed_role=None):
         # A role/label dropdown changed. Ignore programmatic updates from
-        # name-guessing (_refresh_choices).
+        # name-guessing / choice re-derivation (see _suspend_role_events).
         if self._refreshing:
             return
         # A layer may fill only one role: if the changed role now points at a
@@ -228,13 +272,10 @@ class SpacetimeWidget(Container):
         if changed_role is not None:
             value = self._role_combos[changed_role].value
             if value and value != _NONE_CHOICE:
-                self._refreshing = True
-                try:
+                with self._suspend_role_events():
                     for role, combo in self._role_combos.items():
                         if role != changed_role and combo.value == value:
                             combo.value = _NONE_CHOICE
-                finally:
-                    self._refreshing = False
         # Re-apply live if the Divisualisation lift is active.
         if self._lift_errors.value and self._lift_errors_engine.applied:
             self._apply_lift(self._lift_errors_engine, self._roles_target())
@@ -272,6 +313,15 @@ class SpacetimeWidget(Container):
             if type(layer).__name__ == "Labels"
         ]
 
+    # magicgui ``choices`` callables -- receive the ComboBox and return its
+    # current options. Used so napari's reset_choices re-derives live choices on
+    # every layer event (see __init__).
+    def _track_choices(self, *_):
+        return [_NONE_CHOICE, *self._track_layer_names()]
+
+    def _label_choices(self, *_):
+        return [_NONE_CHOICE, *self._labels_layer_names()]
+
     @staticmethod
     def _guess(names, hints, already):
         for name in names:
@@ -281,49 +331,40 @@ class SpacetimeWidget(Container):
                 return name
         return _NONE_CHOICE
 
-    def _refresh_choices(self, *_):
+    def _guess_once(self):
+        # Auto-guess roles / labels from layer names, but only the first time and
+        # only while nothing is lifted. After this the dropdowns belong to the
+        # user: napari's reset_choices keeps the option lists current on later
+        # layer events, and this never re-guesses or disturbs a selection again.
+        if self._guessed:
+            return
         if self._lift_all_engine.applied or self._lift_errors_engine.applied:
-            return  # don't reshuffle while a lift is active
-        self._refreshing = True
-        try:
-            self._refresh_choices_impl()
-        finally:
-            self._refreshing = False
-
-    def _refresh_choices_impl(self):
+            return
         track_names = self._track_layer_names()
-        track_choices = [_NONE_CHOICE, *track_names]
-        assigned = {
-            c.value
-            for c in self._role_combos.values()
-            if c.value not in (None, _NONE_CHOICE)
-        }
-        for role in ROLES:
-            combo = self._role_combos[role]
-            keep = combo.value if combo.value in track_names else _NONE_CHOICE
-            combo.choices = track_choices
-            if keep != _NONE_CHOICE:
-                combo.value = keep
-                continue
-            guess = self._guess(track_names, _ROLE_NAME_HINTS[role], assigned)
-            combo.value = guess
-            if guess != _NONE_CHOICE:
-                assigned.add(guess)
-
         label_names = self._labels_layer_names()
-        label_choices = [_NONE_CHOICE, *label_names]
-        used: set[str] = set()
-        for combo, key in ((self._gt_labels, "gt"), (self._pred_labels, "pred")):
-            keep = combo.value if combo.value in label_names else _NONE_CHOICE
-            combo.choices = label_choices
-            if keep != _NONE_CHOICE:
-                combo.value = keep
-                used.add(keep)
-                continue
-            guess = self._guess(label_names, _LABELS_HINTS[key], used)
-            combo.value = guess
-            if guess != _NONE_CHOICE:
-                used.add(guess)
+        if not (track_names or label_names):
+            return  # nothing to guess from yet; try again on the next insert
+        self._guessed = True
+
+        with self._suspend_role_events():
+            # Make sure the combos list the current layers before we assign
+            # guesses -- our inserted handler may run before napari's own
+            # reset_choices for the same event.
+            self.reset_choices()
+            assigned: set[str] = set()
+            for role in ROLES:
+                combo = self._role_combos[role]
+                guess = self._guess(track_names, _ROLE_NAME_HINTS[role], assigned)
+                combo.value = guess
+                if guess != _NONE_CHOICE:
+                    assigned.add(guess)
+
+            used: set[str] = set()
+            for combo, key in ((self._gt_labels, "gt"), (self._pred_labels, "pred")):
+                guess = self._guess(label_names, _LABELS_HINTS[key], used)
+                combo.value = guess
+                if guess != _NONE_CHOICE:
+                    used.add(guess)
 
     # --- compute errors -----------------------------------------------------
 
@@ -365,22 +406,19 @@ class SpacetimeWidget(Container):
             layers[pred_tracks],
             layers[pred_labels],
         )
-        # Refresh dropdown choices (the new error layers must be present as
-        # options) then point the FN/FP roles at them. Guard with _refreshing so
-        # these programmatic combo updates don't each trigger a re-lift.
-        self._refresh_choices()
+        # Make sure the new error layers are present as options, then point the
+        # FN/FP roles at them. Suspend role events so re-deriving choices and
+        # setting these values don't each trigger a re-lift.
         role_by_flag = {
             "fn_edges": EdgeFlag.CTC_FALSE_NEG,
             "fp_edges": EdgeFlag.CTC_FALSE_POS,
         }
-        self._refreshing = True
-        try:
+        with self._suspend_role_events():
+            self.reset_choices()
             for role, flag in role_by_flag.items():
                 layer = error_layers.get(flag)
                 if layer is not None and layer.name in self._role_combos[role].choices:
                     self._role_combos[role].value = layer.name
-        finally:
-            self._refreshing = False
 
         if was_lifted:
             self._apply_lift(self._lift_errors_engine, self._roles_target())

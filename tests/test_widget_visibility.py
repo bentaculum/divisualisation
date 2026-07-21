@@ -36,6 +36,7 @@ def test_error_controls_visible_before_toggle():
     # (previously they were hidden until the toggle went on).
     v = _make_viewer()
     w = SpacetimeWidget(v)
+    w._guess_once()  # run the one-time auto-guess (normally a deferred tick)
     assert not w._lift_errors.value  # toggle off
     controls = (*w._role_combos.values(), w._gt_labels, w._pred_labels, w._compute_btn)
     for widget in controls:
@@ -55,17 +56,20 @@ def test_error_controls_visible_before_toggle():
         w.hide()
 
 
-def test_hide_unselected_hides_only_unselected():
+def test_hide_unselected_hides_only_unselected_tracks():
     v = _make_viewer()
     w = SpacetimeWidget(v)
-    # Role-guessing picks gt/pred tracks + gt/pred masks; "other tracks" and
-    # "raw" are unselected.
+    w._guess_once()  # run the one-time auto-guess (normally a deferred tick)
+    # Role-guessing picks gt/pred tracks + gt/pred masks; "other tracks" is an
+    # unselected tracks layer; "raw" is an (always-untouched) image layer.
     w._hide_unselected()
     vis = _visible(v)
-    # Selected non-predicted layers stay visible.
-    assert vis["gt tracks"] and vis["gt masks"] and vis["pred masks"]
-    # Unselected layers are hidden.
-    assert not vis["raw"]
+    # Selected tracks stay visible.
+    assert vis["gt tracks"]
+    # Non-tracks layers are never hidden, selected or not.
+    assert vis["raw"]  # image, untouched
+    assert vis["gt masks"] and vis["pred masks"]  # labels, untouched
+    # Unselected TRACKS layers are hidden.
     assert not vis["other tracks"]
     # Predicted tracks are hidden by default even though they fill a role.
     assert not vis["pred tracks"]
@@ -77,6 +81,7 @@ def test_restore_hidden_round_trips_visibility():
     v.layers["other tracks"].visible = False
     before = _visible(v)
     w = SpacetimeWidget(v)
+    w._guess_once()  # run the one-time auto-guess (normally a deferred tick)
     w._hide_unselected()
     w._restore_hidden()
     assert _visible(v) == before
@@ -88,6 +93,7 @@ def test_changing_role_updates_hidden_set():
     # a full restore must still return to the true original visibility.
     v = _make_viewer()
     w = SpacetimeWidget(v)
+    w._guess_once()  # run the one-time auto-guess (normally a deferred tick)
     original = _visible(v)
 
     w._hide_unselected()
@@ -108,6 +114,7 @@ def test_changing_role_updates_hidden_set():
 def test_selected_layer_names_covers_all_six_dropdowns():
     v = _make_viewer()
     w = SpacetimeWidget(v)
+    w._guess_once()  # run the one-time auto-guess (normally a deferred tick)
     names = w._selected_layer_names()
     # gt/pred tracks (roles) and gt/pred masks (labels) are all guessed.
     assert {"gt tracks", "pred tracks", "gt masks", "pred masks"} <= names
