@@ -50,7 +50,8 @@ visibility toggles for free — no plugin required.
 2D vs 3D is auto-detected from the graph nodes (2D iff nodes have no `z`
 attribute). Pass `scale=(y_scale, x_scale)` (spatial only, no leading time
 entry) to align the overlay with your image/labels layers. See
-`example_interactive_2d.py`.
+`example_programmatic_2d.py`, which uses `add_edge_error_tracks` as part of a
+fully scripted render.
 
 Divisualisation also ships two optional napari dock widgets (**Plugins → Divisualisation**):
 
@@ -71,6 +72,8 @@ time slider yourself.
 
 #### Rendering an animation
 
-To render the spacetime mp4 animations shown above, use the `Divisualisation`
-class directly (`visualize_gt` / `visualize_edge_errors` / `render`), which folds
-time into the `z` axis and drives a scripted keyframe render.
+To render the spacetime mp4 animations shown above without any GUI interaction,
+run `example_programmatic_2d.py`. It scripts the whole pipeline -- build the
+layers, fold time into `z` with `SpacetimeLift`, add the edge-error overlays
+with `add_edge_error_tracks`, then capture a `napari_animation` keyframe render
+-- driving the same machinery the interactive plugin uses.
