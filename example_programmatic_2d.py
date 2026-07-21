@@ -88,14 +88,19 @@ for role, flag in (
 
 lift = SpacetimeLift(viewer, time_scale=12)
 lift.apply(role_names)  # goes 3D, folds time into z, applies the error-view look
+viewer.camera.zoom = 0.5  # pull back so the whole spacetime cone stays in frame
 
-# Render a video by scrubbing the time slider from first to last frame. This is
-# the whole render: napari_animation captures a keyframe per slider end and
-# tweens between them.
+# Render a video by scrubbing the time slider, which sweeps the clipping plane
+# through the cone. Keyframes: sweep up to reveal the full tree, hold on it for
+# half as long as the sweep, then sweep back down to the start.
+last = viewer.dims.nsteps[0] - 1
 animation = Animation(viewer)
 viewer.dims.set_current_step(0, 0)
-animation.capture_keyframe()
-viewer.dims.set_current_step(0, viewer.dims.nsteps[0] - 1)
-animation.capture_keyframe(steps=60)
+animation.capture_keyframe()  # start: plane at the bottom
+viewer.dims.set_current_step(0, last)
+animation.capture_keyframe(steps=60)  # sweep up to the full tree
+animation.capture_keyframe(steps=30)  # hold on the full tree (~half the sweep)
+viewer.dims.set_current_step(0, 0)
+animation.capture_keyframe(steps=60)  # sweep back down to the start
 animation.animate("divisualisation_2d.mp4", fps=12, canvas_only=True)
 print("Saved divisualisation_2d.mp4")
