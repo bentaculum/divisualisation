@@ -21,7 +21,10 @@ logger = logging.getLogger(__name__)
 def _clipping_planes(cut_at: float):
     """Clip everything ahead of ``cut_at`` along the first (folded-time) axis."""
     return [
-        {"position": (0, 0, 0), "normal": (0, 0, 0), "enabled": False},
+        # Disabled placeholder: its normal is never used, but napari normalizes
+        # the normal on construction, so a zero vector triggers a numpy
+        # "invalid value encountered in divide" warning. Use a unit vector.
+        {"position": (0, 0, 0), "normal": (1, 0, 0), "enabled": False},
         {"position": (cut_at, 0, 0), "normal": (-1, 0, 0), "enabled": True},
     ]
 
@@ -363,6 +366,11 @@ class SpacetimeLift:
         if _is_labels(layer):
             _set_labels_data(layer, snap["data"])
         else:
+            # Setting .data clears features to just {track_id}; napari warns if
+            # the active color_by (e.g. a lifted "_lift_*" key) is gone at that
+            # instant. Fall back to track_id first; the snapped color_by is
+            # restored below once its property is back.
+            layer.color_by = "track_id"
             layer.data = snap["data"]
             if "graph" in snap:
                 layer.graph = snap["graph"]
@@ -486,6 +494,11 @@ class SpacetimeLift:
         # (e.g. segmentation_id, used to compute errors) survive the lift.
         graph = dict(layer.graph)
         properties = {k: v.copy() for k, v in layer.properties.items()}
+        color_by = layer.color_by
+        # Setting .data clears features to just {track_id}; napari warns if the
+        # active color_by is gone at that moment. Fall back to track_id first,
+        # then restore the real coloring once its property is back.
+        layer.color_by = "track_id"
         # napari skips updating a HIDDEN layer's ndim/extent when its data
         # changes, so folding a hidden layer from 4->5 columns leaves a stale
         # 3-col extent that crashes the 3D draw (index 3 out of bounds). Set the
@@ -494,6 +507,8 @@ class SpacetimeLift:
         layer.data = self._folded(base)
         layer.graph = graph
         layer.properties = properties
+        if color_by in layer.properties or not layer.properties:
+            layer.color_by = color_by
 
     def _folded(self, base: np.ndarray) -> np.ndarray:
         data = base.copy()
@@ -512,6 +527,12 @@ class SpacetimeLift:
             properties = {k: v.copy() for k, v in layer.properties.items()}
             color_by = layer.color_by
             colormap = layer.colormap
+            # Setting .data clears features to just {track_id}, and napari warns
+            # ("... not present in features. Falling back to track_id") if the
+            # active color_by (e.g. a custom "_lift_*" key) is gone at that
+            # moment. Point color_by at the always-present track_id first, then
+            # restore the real coloring once its property is back.
+            layer.color_by = "track_id"
             layer.data = self._folded(base)
             layer.graph = graph
             layer.properties = properties
@@ -553,7 +574,9 @@ class SpacetimeLift:
         """
         t = self._viewer.dims.point[0]
         clipping_planes = [
-            {"position": (0, 0, 0), "normal": (0, 0, 0), "enabled": False},
+            # Disabled placeholder with a unit normal; a zero normal would trip
+            # napari's normal-normalization ("invalid value in divide").
+            {"position": (0, 0, 0), "normal": (1, 0, 0), "enabled": False},
             {
                 "position": (-t * self._time_scale, 0, 0),
                 "normal": (1, 0, 0),

@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 import pytest
 from napari.components import ViewerModel
@@ -259,3 +261,38 @@ def test_slider_change_keeps_error_colors():
     np.testing.assert_allclose(
         v.layers["gt"].data[:, 2], -30 * v.layers["gt"].data[:, 1]
     )
+
+
+def test_slider_refold_emits_no_color_by_warning():
+    # Re-folding sets layer.data, which momentarily clears the layer's features
+    # to just {track_id}. napari warns ("... not present in features. Falling
+    # back to track_id") if the active color_by (here "_lift_gt") is gone at
+    # that instant, and silently drops the coloring. Re-folding must not warn.
+    v = ViewerModel()
+    v.add_image(np.zeros((6, 8, 8)), name="raw")
+    v.add_tracks(np.array([[1, t, 5, 5] for t in range(6)], float), name="gt")
+    lift = SpacetimeLift(v, time_scale=10)
+    lift.apply({"gt": "gt", "pred": "", "fn_edges": "", "fp_edges": ""})
+    assert v.layers["gt"].color_by == "_lift_gt"
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", message=".*not present in features.*")
+        lift.time_scale = 30  # slider move -> _refold_tracks
+    # And the real coloring is still active afterwards, not reset to track_id.
+    assert v.layers["gt"].color_by == "_lift_gt"
+
+
+def test_lift_emits_no_invalid_divide_warning():
+    # The disabled placeholder clipping plane must carry a unit normal: napari
+    # normalizes a plane's normal on construction, so a zero normal raises a
+    # numpy "invalid value encountered in divide" (0/0) warning. Applying the
+    # lift and sweeping the clip plane must stay silent.
+    v = ViewerModel()
+    v.add_image(np.zeros((6, 8, 8)), name="raw")
+    v.add_tracks(np.array([[1, t, 5, 5] for t in range(6)], float), name="gt")
+    lift = SpacetimeLift(v, time_scale=10)
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", message="invalid value encountered in divide")
+        lift.apply(["gt"])
+        lift._update_sweep()
