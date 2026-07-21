@@ -15,19 +15,29 @@ workflows via two toggle switches sharing one lift-amount slider:
 The role / labels dropdowns and Compute button are always shown, even before the
 Divisualisation toggle is on, so layers can be picked up front.
 
+A "Color division edges" checkbox (under the dropdowns, default off) applies only
+in the Divisualisation workflow and only to the tracks layers picked in the role
+dropdowns. When on, each selected role layer's parent->daughter division edges --
+which napari otherwise draws in a hardcoded, uncolorable white -- are redrawn as a
+separate Tracks layer colored with that role's colormap, and the source layer's
+own (white) graph edges are suppressed while active. All of it is undone on
+toggle-off / uncheck.
+
 Additive: the functional API works without it.
 """
 
 from contextlib import contextmanager
 
 import napari
+import numpy as np
 from magicgui.backends._qtpy.widgets import QBaseValueWidget
-from magicgui.widgets import ComboBox, Container, FloatSlider, PushButton
+from magicgui.widgets import CheckBox, ComboBox, Container, FloatSlider, PushButton
 from magicgui.widgets.bases import ValueWidget
+from napari.utils.colormaps.colormap_utils import vispy_or_mpl_colormap
 from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
 from superqt import QToggleSwitch
 
-from .lift import ROLES, SpacetimeLift, _is_tracks
+from .lift import ROLE_DISPLAY, ROLES, SpacetimeLift, _is_tracks
 
 
 class _ToggleSwitchBackend(QBaseValueWidget):
@@ -66,6 +76,17 @@ class SpacetimeWidget(Container):
     def __init__(self, viewer: "napari.viewer.Viewer"):
         super().__init__()
         self._viewer = viewer
+        # Colored-division-edge state. Initialized FIRST: magicgui evaluates the
+        # combos' ``choices`` callables (which read these) during widget
+        # construction below, before the rest of __init__ runs.
+        # role -> the widget-owned Tracks layer holding that role's colored
+        # division edges (keyed by role; the layer OBJECT is the identity we act
+        # on, never its name -- napari uniquifies / the user can rename).
+        self._division_edge_layers: dict = {}
+        # Source role layers whose native (white) graph we suppressed while the
+        # colored edges are shown, mapped to the graph we must restore. Keyed by
+        # the layer object.
+        self._suppressed_graphs: dict = {}
         # One lift engine per toggle view, so each view keeps its own
         # layer-control settings. They share a camera store, so the camera
         # (center/zoom/angles/perspective) is shared across the two views.
@@ -93,11 +114,15 @@ class SpacetimeWidget(Container):
         }
         self._gt_labels = ComboBox(label="GT labels", choices=self._label_choices)
         self._pred_labels = ComboBox(label="pred labels", choices=self._label_choices)
+        # Under the 6 role/labels dropdowns: opt-in colored division edges (see
+        # module docstring). Only acts in the Divisualisation workflow.
+        self._division_edges = CheckBox(value=False, label="Color division edges")
         self._compute_btn = PushButton(text="Compute errors")
         self._error_controls = [
             *self._role_combos.values(),
             self._gt_labels,
             self._pred_labels,
+            self._division_edges,
             self._compute_btn,
         ]
 
@@ -113,6 +138,7 @@ class SpacetimeWidget(Container):
         self._lift_all.changed.connect(self._on_toggle_all)
         self._lift_errors.changed.connect(self._on_toggle_errors)
         self._lift_amount.changed.connect(self._on_lift_amount)
+        self._division_edges.changed.connect(self._on_division_edges_changed)
         self._compute_btn.changed.connect(self._on_compute)
         for role, combo in self._role_combos.items():
             combo.changed.connect(lambda *_, r=role: self._on_role_changed(r))
@@ -132,6 +158,9 @@ class SpacetimeWidget(Container):
         # never disturbs a selection thereafter.
         self._viewer.layers.events.inserted.connect(self._guess_once)
         self._show_error_controls()
+        # When the dock widget is torn down, drop any colored division-edge
+        # layers we own so they don't leak into the viewer.
+        self.native.destroyed.connect(lambda *_: self._teardown_division_edges())
         # Defer the initial guess to the next event-loop tick: add_dock_widget
         # resets combo values right after __init__, so guessing synchronously
         # here would be clobbered.
@@ -157,6 +186,16 @@ class SpacetimeWidget(Container):
             self._restore_hidden()
             if not self._lift_all.value:
                 self._revert_lift()
+            # Revert (above) restores each source layer's own graph via the
+            # engine snapshot; drop our edge layers and suppression bookkeeping.
+            self._teardown_division_edges()
+
+    def _on_division_edges_changed(self, *_):
+        # Only meaningful in an active Divisualisation view. Re-run the standard
+        # apply transaction so edges are (re)built or torn down with the correct
+        # revert -> build-from-flat -> apply ordering.
+        if self._lift_errors.value and self._lift_errors_engine.applied:
+            self._apply_lift(self._lift_errors_engine, self._roles_target())
 
     def _selected_layer_names(self):
         """Names picked in any role or labels dropdown (the layers the
@@ -186,9 +225,12 @@ class SpacetimeWidget(Container):
         # a live re-apply (that would record the already-hidden state).
         if not hasattr(self, "_prior_visible") or self._prior_visible is None:
             self._prior_visible = {}
+        edge_layers = set(self._division_edge_layers.values())
         for layer in self._viewer.layers:
             if not _is_tracks(layer):
                 continue  # never hide image / labels layers
+            if layer in edge_layers:
+                continue  # our colored division-edge overlays always stay shown
             if layer.name in keep:
                 # A previously hidden layer that is now selected: show it and
                 # forget its snapshot so we don't re-hide/restore it wrongly.
@@ -217,10 +259,22 @@ class SpacetimeWidget(Container):
                 e.revert()
         self._lift = engine
         engine.time_scale = self._lift_amount.value
+        # Colored division edges (Divisualisation only). Rebuild AFTER the revert
+        # above (so we read the source layers' FLAT data, never doubly-folded)
+        # and BEFORE engine.apply below (so the fresh edge layers are present when
+        # the engine snapshots the scene, and thus get lifted / swept / reverted
+        # with everything else). Switching to Lift-all tears them down instead.
+        if engine is self._lift_errors_engine:
+            self._rebuild_division_edges()
+        else:
+            self._teardown_division_edges()
         # Always lift EVERY tracks layer. In the errors workflow ``target`` is a
         # role mapping (those get error-view colors); every other tracks layer
         # (incl. hidden, non-role ones) is lifted too, keeping its own coloring.
         engine.apply(target, extra_layers=self._all_tracks_target())
+        # The shared common-display pass resets tail_width; give the edge layers
+        # their role's wider tail back now that the lift is applied.
+        self._restyle_division_edges()
         # In the Divisualisation view, keep only the selected layers visible.
         # Re-run on every apply so changing a dropdown updates what's hidden.
         if engine is self._lift_errors_engine:
@@ -290,6 +344,138 @@ class SpacetimeWidget(Container):
             w.visible = True
             w.enabled = True
 
+    # --- colored division edges ---------------------------------------------
+
+    def _selected_role_layers(self):
+        """(role, layer) for each role dropdown pointing at a real tracks layer.
+
+        Skips ``pred``: predicted tracks are hidden in the Divisualisation view
+        (their errors show via the FN/FP overlays), so drawing their division
+        edges would just add hidden clutter.
+        """
+        for role, combo in self._role_combos.items():
+            if role == "pred":
+                continue
+            name = combo.value
+            if not name or name == _NONE_CHOICE or name not in self._viewer.layers:
+                continue
+            layer = self._viewer.layers[name]
+            if _is_tracks(layer):
+                yield role, layer
+
+    @staticmethod
+    def _division_edges_from_layer(layer):
+        """Reconstruct a layer's parent->daughter division edges as track rows.
+
+        napari's Tracks ``graph`` maps ``child_track_id -> [parent_track_ids]``.
+        Each division edge runs from the parent track's LAST vertex (max time) to
+        the child track's FIRST vertex (min time) -- picked by time, not row
+        order, so it is correct whether or not the source kept the shared
+        division node. Returns an ``(N, cols)`` array of ``[edge_id, t, (z,)
+        y, x]`` rows (two per edge, matching the source layer's column count), or
+        ``None`` if the layer has no divisions.
+        """
+        graph = dict(layer.graph)
+        if not graph:
+            return None
+        data = np.asarray(layer.data, dtype=float)  # [track_id, t, (z,) y, x]
+        track_ids = data[:, 0]
+
+        def endpoint(track_id, which):
+            rows = data[track_ids == track_id]
+            if len(rows) == 0:
+                return None
+            idx = np.argmax(rows[:, 1]) if which == "last" else np.argmin(rows[:, 1])
+            return rows[idx]
+
+        rows = []
+        edge_id = 0
+        for child, parents in graph.items():
+            child_first = endpoint(child, "first")
+            if child_first is None:
+                continue
+            for parent in np.atleast_1d(parents):
+                parent_last = endpoint(int(parent), "last")
+                if parent_last is None:
+                    continue
+                edge_id += 1
+                # Two vertices of one edge share the synthetic edge id; keep the
+                # source layer's remaining columns (t, [z,] y, x) verbatim.
+                rows.append([edge_id, *parent_last[1:]])
+                rows.append([edge_id, *child_first[1:]])
+        if not rows:
+            return None
+        return np.asarray(rows, dtype=float)
+
+    def _rebuild_division_edges(self):
+        """Tear down any existing colored edges, then (if the checkbox is on)
+        build one colored division-edge Tracks layer per selected role.
+
+        MUST be called while the lift is reverted (reads flat source data) and
+        before ``engine.apply`` (so the new layers are lifted with everything
+        else). Suppresses each source layer's own (white) graph edges while ours
+        are shown; the suppression is restored by the engine's revert snapshot
+        and, defensively, by ``_teardown_division_edges``.
+        """
+        self._teardown_division_edges()
+        if not self._division_edges.value:
+            return
+        with self._suspend_role_events():
+            for role, layer in self._selected_role_layers():
+                edges = self._division_edges_from_layer(layer)
+                if edges is None:
+                    continue
+                colormap = ROLE_DISPLAY[role]["colormap"]
+                edge_layer = self._viewer.add_tracks(
+                    edges,
+                    name=f"{layer.name} division edges",
+                    properties={"_div": np.full(len(edges), 0.5)},
+                    color_by="_div",
+                    colormaps_dict={"_div": vispy_or_mpl_colormap(colormap)},
+                    blending="translucent_no_depth",
+                    tail_length=1000,
+                    head_length=0,
+                    opacity=1.0,
+                )
+                self._division_edge_layers[role] = edge_layer
+                # Hide the source layer's native white graph edges while our
+                # colored ones stand in; remember the graph to restore on revert.
+                if layer not in self._suppressed_graphs and dict(layer.graph):
+                    self._suppressed_graphs[layer] = dict(layer.graph)
+                    layer.graph = {}
+
+    def _restyle_division_edges(self):
+        """Re-apply each edge layer's role tail width after a lift.
+
+        The engine's shared common-display pass resets ``tail_width``; restore
+        the role's width (error roles are wider) so edges read clearly.
+        """
+        for role, edge_layer in self._division_edge_layers.items():
+            if edge_layer not in self._viewer.layers:
+                continue
+            width_factor = ROLE_DISPLAY[role]["width_factor"]
+            edge_layer.tail_width = 2 * width_factor
+
+    def _teardown_division_edges(self):
+        """Remove our edge layers and restore any suppressed source graphs.
+
+        Safe to call whether or not a lift is active. Restoring graphs here is
+        belt-and-suspenders: the engine's revert already restores them from its
+        snapshot, but a source layer may have been deselected (and so not
+        reverted through that path).
+        """
+        for edge_layer in list(self._division_edge_layers.values()):
+            if edge_layer in self._viewer.layers:
+                self._viewer.layers.remove(edge_layer)
+        self._division_edge_layers.clear()
+        for layer, graph in list(self._suppressed_graphs.items()):
+            if layer in self._viewer.layers:
+                try:
+                    layer.graph = graph
+                except (KeyError, ValueError):
+                    pass
+        self._suppressed_graphs.clear()
+
     # --- layer discovery ----------------------------------------------------
 
     def _all_tracks_target(self):
@@ -304,7 +490,14 @@ class SpacetimeWidget(Container):
         }
 
     def _track_layer_names(self):
-        return [layer.name for layer in self._viewer.layers if _is_tracks(layer)]
+        # Exclude our own colored division-edge overlays (by object identity, not
+        # name -- napari uniquifies names) so they never appear as role options.
+        edge_layers = set(self._division_edge_layers.values())
+        return [
+            layer.name
+            for layer in self._viewer.layers
+            if _is_tracks(layer) and layer not in edge_layers
+        ]
 
     def _labels_layer_names(self):
         return [

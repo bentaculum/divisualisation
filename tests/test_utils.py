@@ -77,3 +77,46 @@ def test_drop_division_duplicates():
     )
     assert len(dropped) == graph.number_of_nodes()  # 4, one row per detection
     assert len(kept) > len(dropped)  # duplicates present by default
+
+
+def test_division_edges_from_layer_reconstructs_endpoints():
+    # Reconstructing the widget's colored division edges needs no GUI viewer:
+    # a bare Tracks layer carries the .data + .graph the staticmethod reads.
+    import numpy as np
+    from napari.layers import Tracks
+
+    from divisualisation._widget import SpacetimeWidget
+
+    graph = _dividing_2d_graph()
+    # Layers are built by the examples with the division node dropped, so each
+    # daughter starts one step after the parent -- the realistic input.
+    tracks, tracks_graph, _ = graph_to_napari_tracks(
+        graph, include_z=False, drop_division_duplicates=True
+    )
+    layer = Tracks(tracks, graph=tracks_graph)
+
+    edges = SpacetimeWidget._division_edges_from_layer(layer)
+    # Two divisions (1->2, 1->3), two vertices each.
+    assert edges.shape == (4, 4)  # [edge_id, t, y, x]
+    # Vertices of one edge share an edge id; two distinct edges.
+    assert set(edges[:, 0]) == {1, 2}
+    # Each edge runs parent-last (t1, y1, x1) -> daughter-first (t2, ...).
+    for eid in (1, 2):
+        e = edges[edges[:, 0] == eid]
+        parent, child = e[e[:, 1].argmin()], e[e[:, 1].argmax()]
+        np.testing.assert_allclose(parent[1:], [1.0, 1.0, 1.0])  # node 1
+        assert child[1] == 2.0  # daughter at t2
+        assert tuple(child[2:]) in {(2.0, 2.0), (3.0, 3.0)}  # node 2 or 3
+
+
+def test_division_edges_from_layer_none_without_divisions():
+    from napari.layers import Tracks
+
+    from divisualisation._widget import SpacetimeWidget
+
+    # A single linear track has an empty graph -> no division edges.
+    tracks, tracks_graph, _ = graph_to_napari_tracks(
+        _linear_2d_graph(), include_z=False
+    )
+    layer = Tracks(tracks, graph=tracks_graph)
+    assert SpacetimeWidget._division_edges_from_layer(layer) is None

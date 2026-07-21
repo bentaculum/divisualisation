@@ -386,3 +386,126 @@ def test_divisualisation_hides_predicted_by_default(make_napari_viewer):
     w._lift_errors.value = False
     # ...and restored to its prior visibility on toggle-off.
     assert viewer.layers["predicted tracks"].visible
+
+
+def _add_dividing_gt(viewer, name="GT tracks"):
+    """Add a GT tracks layer whose graph has one division (built like the
+    examples, with the shared division node dropped)."""
+    import networkx as nx
+
+    from divisualisation.utils import graph_to_napari_tracks
+
+    g = nx.DiGraph()
+    # 0 (t0) -> 1 (t1) divides into 2 and 3 (t2), each continues to t3.
+    coords = {
+        0: (0, 5.0, 5.0),
+        1: (1, 6.0, 6.0),
+        2: (2, 7.0, 4.0),
+        3: (2, 7.0, 8.0),
+        4: (3, 8.0, 3.0),
+        5: (3, 8.0, 9.0),
+    }
+    for n, (t, y, x) in coords.items():
+        g.add_node(n, t=t, y=y, x=x)
+    for u, v in [(0, 1), (1, 2), (1, 3), (2, 4), (3, 5)]:
+        g.add_edge(u, v)
+    tracks, tracks_graph, _ = graph_to_napari_tracks(
+        g, include_z=False, drop_division_duplicates=True
+    )
+    return viewer.add_tracks(tracks, graph=tracks_graph, name=name, tail_length=5)
+
+
+def _edge_layers(viewer):
+    return [ly for ly in viewer.layers if ly.name.endswith("division edges")]
+
+
+def test_division_edges_off_by_default(make_napari_viewer):
+    import numpy as np
+
+    from divisualisation._widget import SpacetimeWidget
+
+    viewer = make_napari_viewer()
+    viewer.add_image(np.zeros((4, 20, 20)), name="raw")
+    _add_dividing_gt(viewer)
+
+    w = SpacetimeWidget(viewer)
+    assert w._division_edges.value is False
+    # Toggling Divisualisation without checking the box adds no edge layers.
+    w._lift_errors.value = True
+    assert _edge_layers(viewer) == []
+    # The GT layer keeps its own (white) graph edges -- graph not suppressed.
+    assert dict(viewer.layers["GT tracks"].graph)
+
+
+def test_division_edges_build_and_teardown(make_napari_viewer):
+    import numpy as np
+
+    from divisualisation._widget import SpacetimeWidget
+
+    viewer = make_napari_viewer()
+    viewer.add_image(np.zeros((4, 20, 20)), name="raw")
+    _add_dividing_gt(viewer)
+
+    w = SpacetimeWidget(viewer)
+    w._division_edges.value = True
+    w._lift_errors.value = True
+
+    # One colored edge layer for the GT role; it is lifted (5 columns) with the
+    # rest, and the source layer's white graph is suppressed while it stands in.
+    edges = _edge_layers(viewer)
+    assert len(edges) == 1
+    edge_layer = edges[0]
+    assert edge_layer.data.shape[1] == 5  # lifted alongside everything else
+    assert edge_layer.color_by == "_div"
+    assert not dict(viewer.layers["GT tracks"].graph)  # native edges suppressed
+
+    # Toggle Divisualisation off: edge layer gone, GT graph restored, flat again.
+    w._lift_errors.value = False
+    assert _edge_layers(viewer) == []
+    assert dict(viewer.layers["GT tracks"].graph)  # restored
+    assert viewer.layers["GT tracks"].data.shape[1] == 4
+
+
+def test_division_edges_checkbox_live_toggle(make_napari_viewer):
+    import numpy as np
+
+    from divisualisation._widget import SpacetimeWidget
+
+    viewer = make_napari_viewer()
+    viewer.add_image(np.zeros((4, 20, 20)), name="raw")
+    _add_dividing_gt(viewer)
+
+    w = SpacetimeWidget(viewer)
+    w._lift_errors.value = True
+    assert _edge_layers(viewer) == []  # box off
+
+    # Checking the box while Divisualisation is active builds the edges live...
+    w._division_edges.value = True
+    assert len(_edge_layers(viewer)) == 1
+    assert not dict(viewer.layers["GT tracks"].graph)
+
+    # ...and unchecking removes them and restores the source graph, still lifted.
+    w._division_edges.value = False
+    assert _edge_layers(viewer) == []
+    assert dict(viewer.layers["GT tracks"].graph)
+    assert viewer.layers["GT tracks"].data.shape[1] == 5  # still lifted
+
+
+def test_division_edges_not_in_dropdowns(make_napari_viewer):
+    import numpy as np
+
+    from divisualisation._widget import SpacetimeWidget
+
+    viewer = make_napari_viewer()
+    viewer.add_image(np.zeros((4, 20, 20)), name="raw")
+    _add_dividing_gt(viewer)
+
+    w = SpacetimeWidget(viewer)
+    w._division_edges.value = True
+    w._lift_errors.value = True
+
+    # The widget-owned edge overlay must never appear as a selectable role.
+    assert len(_edge_layers(viewer)) == 1
+    assert not any(name.endswith("division edges") for name in w._track_layer_names())
+    # It also stays visible (not swept into the hidden set) under the errors view.
+    assert _edge_layers(viewer)[0].visible
