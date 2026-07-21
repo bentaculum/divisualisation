@@ -490,8 +490,8 @@ class SpacetimeLift:
                 base = data.copy()
             self._track_bases[layer] = base
         # Reassigning .data resets the layer's graph and properties; restore both
-        # so division/lineage edges keep drawing and per-detection properties
-        # (e.g. segmentation_id, used to compute errors) survive the lift.
+        # so division/lineage edges keep drawing and any per-detection properties
+        # the layer carries survive the lift.
         graph = dict(layer.graph)
         properties = {k: v.copy() for k, v in layer.properties.items()}
         color_by = layer.color_by

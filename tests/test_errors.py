@@ -180,6 +180,83 @@ def test_detect_ndim_rejects_empty_graph(make_graph):
         _detect_ndim(make_graph([], ndim=2))
 
 
+# --- compute_edge_errors_from_layers: implicit segmentation matching ---------
+
+
+def _seg_from_points(points, t_len, shape=(8, 8)):
+    """Segmentation with a unique label at each detection's (t, y, x) pixel."""
+    seg = np.zeros((t_len, *shape), int)
+    for i, (t, y, x) in enumerate(points, start=1):
+        seg[t, y, x] = i
+    return seg
+
+
+def test_compute_edge_errors_implicit_matching_finds_fn(viewer_model):
+    # End-to-end through the real load_napari_data: GT has an edge that pred
+    # lacks (pred splits it into two separate tracks), so it is a false-negative
+    # edge. Detections carry NO segmentation_id property -- labels are matched
+    # implicitly from the pixel under each track point.
+    from divisualisation.errors import compute_edge_errors_from_layers
+
+    v = viewer_model
+    gt_pts = [(0, 2, 2), (1, 2, 3)]
+    gt_t = v.add_tracks(
+        np.array([[1, t, y, x] for (t, y, x) in gt_pts], float), name="gt tracks"
+    )
+    gt_l = v.add_labels(_seg_from_points(gt_pts, 2), name="gt masks")
+    # Pred: same two positions but as two disconnected tracks (no edge).
+    pred_t = v.add_tracks(
+        np.array([[1, 0, 2, 2], [2, 1, 2, 3]], float), name="pred tracks"
+    )
+    pred_l = v.add_labels(_seg_from_points(gt_pts, 2), name="pred masks")
+
+    # Sanity: the tracks layers carry no per-detection segmentation id.
+    assert "segmentation_id" not in gt_t.properties
+    assert "segmentation_id" not in pred_t.properties
+
+    out = compute_edge_errors_from_layers(v, gt_t, gt_l, pred_t, pred_l)
+
+    fn = out[EdgeFlag.CTC_FALSE_NEG]
+    assert fn is not None  # the missing GT edge is a false negative
+    assert fn.data.shape[0] == 2  # the edge's two endpoints
+    assert out[EdgeFlag.CTC_FALSE_POS] is None
+    assert "ctc_fn" in {layer.name for layer in v.layers}
+
+
+def test_compute_edge_errors_calls_loader_without_seg_id_key(viewer_model, monkeypatch):
+    # Guard the implicit-matching contract: the loader is called with a
+    # segmentation and WITHOUT seg_id_key (which would force explicit matching).
+    # load_napari_data is imported lazily inside the function (from
+    # traccuracy.loaders), so patch it at that source.
+    import traccuracy.loaders as loaders_mod
+
+    calls = []
+    real_loader = loaders_mod.load_napari_data
+
+    def spy(*args, **kwargs):
+        calls.append(kwargs)
+        return real_loader(*args, **kwargs)
+
+    monkeypatch.setattr(loaders_mod, "load_napari_data", spy)
+
+    v = viewer_model
+    pts = [(0, 2, 2), (1, 2, 3)]
+    data = np.array([[1, t, y, x] for (t, y, x) in pts], float)
+    gt_t = v.add_tracks(data, name="gt tracks")
+    gt_l = v.add_labels(_seg_from_points(pts, 2), name="gt masks")
+    pred_t = v.add_tracks(data, name="pred tracks")
+    pred_l = v.add_labels(_seg_from_points(pts, 2), name="pred masks")
+
+    from divisualisation.errors import compute_edge_errors_from_layers
+
+    compute_edge_errors_from_layers(v, gt_t, gt_l, pred_t, pred_l)
+
+    assert len(calls) == 2  # once per graph (gt, pred)
+    for kwargs in calls:
+        assert kwargs.get("segmentation") is not None  # implicit matching enabled
+        assert "seg_id_key" not in kwargs  # not forced into explicit mode
+
+
 def test_autodetect_from_pred_when_gt_empty(viewer_model, make_graph):
     # Only false positives wanted; the GT graph is empty but detection should
     # still succeed from the (non-empty) prediction graph.

@@ -240,7 +240,6 @@ def compute_edge_errors_from_layers(
     gt_labels,
     pred_tracks,
     pred_labels,
-    seg_id_key="segmentation_id",
     **kwargs,
 ):
     """Compute CTC edge errors from napari layers and overlay them.
@@ -250,9 +249,11 @@ def compute_edge_errors_from_layers(
     edge overlays via :func:`add_edge_error_tracks`. Use this when the errors
     are not already present in the viewer.
 
-    Each tracks layer must carry a per-detection segmentation label id in its
-    ``properties[seg_id_key]`` that matches the label values in the paired
-    labels layer.
+    Detections are matched to the segmentation implicitly: each detection's
+    label is read from the pixel under its ``(t, (z), y, x)`` position, so the
+    tracks layers need no extra per-detection property. This assumes each track
+    point sits inside its own mask (true for tracks produced from the
+    segmentation, e.g. via :func:`~divisualisation.utils.graph_to_napari_tracks`).
 
     Args:
         viewer: The napari viewer to add error layers to.
@@ -260,8 +261,6 @@ def compute_edge_errors_from_layers(
         gt_labels: Ground-truth napari Labels layer (segmentation).
         pred_tracks: Prediction napari Tracks layer.
         pred_labels: Prediction napari Labels layer (segmentation).
-        seg_id_key: Key in each tracks layer's ``properties`` holding the
-            detection's segmentation label id. Defaults to "segmentation_id".
         **kwargs: Forwarded to :func:`add_edge_error_tracks`.
 
     Returns:
@@ -275,20 +274,12 @@ def compute_edge_errors_from_layers(
     from traccuracy.metrics import CTCMetrics
 
     def to_graph(tracks, labels, name):
-        if seg_id_key not in tracks.properties:
-            raise ValueError(
-                f"Tracks layer {tracks.name!r} has no {seg_id_key!r} property, "
-                "which is needed to match detections to the segmentation. Add "
-                "the tracks with that per-detection property (e.g. "
-                'graph_to_napari_tracks(..., properties=["segmentation_id"])).'
-            )
-        props = {seg_id_key: np.asarray(tracks.properties[seg_id_key])}
+        # Implicit matching: pass the segmentation and let load_napari_data read
+        # each detection's label from the pixel under its position.
         return load_napari_data(
             np.asarray(tracks.data),
             graph=tracks.graph,
-            properties=props,
             segmentation=np.asarray(labels.data),
-            seg_id_key=seg_id_key,
             name=name,
         )
 

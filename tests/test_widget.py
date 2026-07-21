@@ -197,7 +197,6 @@ def test_compute_during_lift_reapplies_and_keeps_dropdowns(
         viewer.add_tracks(
             np.array([[1, t, 2, 3] for t in range(4)], float),
             name=nm,
-            properties={"segmentation_id": np.arange(4)},
         )
     viewer.add_labels(np.zeros((4, 8, 8), int), name="gt masks")
     viewer.add_labels(np.zeros((4, 8, 8), int), name="pred masks")

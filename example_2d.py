@@ -60,13 +60,13 @@ viewer.add_image(img, name="raw", colormap="gray")
 viewer.add_labels(gt.segmentation, name="gt masks", opacity=0.3, visible=False)
 viewer.add_labels(pred.segmentation, name="pred masks", opacity=0.3)
 
-# GT and predicted tracks. Carry each detection's segmentation label id so the
-# plugin can compute edge errors, and drop division-node duplicates so the
-# tracks round-trip cleanly back into a graph.
+# GT and predicted tracks. Drop division-node duplicates so the tracks
+# round-trip cleanly back into a graph. No per-detection segmentation id is
+# needed: the plugin matches detections to the segmentation implicitly, reading
+# each label from the pixel under the track point.
 for graph, name in ((gt_graph, "GT tracks"), (pred_graph, "predicted tracks")):
-    tracks, tracks_graph, props = graph_to_napari_tracks(
+    tracks, tracks_graph, _ = graph_to_napari_tracks(
         graph.graph,
-        properties=["segmentation_id"],
         include_z=False,
         drop_division_duplicates=True,
     )
@@ -74,7 +74,6 @@ for graph, name in ((gt_graph, "GT tracks"), (pred_graph, "predicted tracks")):
         tracks,
         graph=tracks_graph,
         name=name,
-        properties={"segmentation_id": np.asarray(props["segmentation_id"])},
         tail_length=5,
     )
 
