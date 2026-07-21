@@ -468,12 +468,13 @@ class SpacetimeWidget(Container):
             if edge_layer in self._viewer.layers:
                 self._viewer.layers.remove(edge_layer)
         self._division_edge_layers.clear()
+        # Put back each source layer's real graph (we only ever zeroed a graph we
+        # first stashed here, and the layer keeps its track ids, so the reassign
+        # is always valid). This is the authoritative restore path -- it also
+        # covers a role deselected while active, which the engine never reverts.
         for layer, graph in list(self._suppressed_graphs.items()):
             if layer in self._viewer.layers:
-                try:
-                    layer.graph = graph
-                except (KeyError, ValueError):
-                    pass
+                layer.graph = graph
         self._suppressed_graphs.clear()
 
     # --- layer discovery ----------------------------------------------------
@@ -591,6 +592,11 @@ class SpacetimeWidget(Container):
         was_lifted = self._lift_errors_engine.applied
         if was_lifted:
             self._lift_errors_engine.revert()
+        # Restore any source graphs suppressed for colored division edges: revert
+        # (above) only restores the zeroed graph the engine snapshotted, but CTC
+        # matching reads each layer's real division edges (errors.py, via
+        # tracks.graph). The trailing _apply_lift rebuilds the colored edges.
+        self._teardown_division_edges()
 
         error_layers = compute_edge_errors_from_layers(
             self._viewer,

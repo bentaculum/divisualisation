@@ -232,6 +232,48 @@ def test_compute_during_lift_reapplies_and_keeps_dropdowns(
     assert w._role_combos["gt"].enabled
 
 
+def test_compute_with_division_edges_sees_real_graph(make_napari_viewer, monkeypatch):
+    # Regression: with colored division edges on, computing errors must run on
+    # the GT layer's REAL graph, not the zeroed one we swap in for the overlay.
+    import numpy as np
+    from traccuracy import EdgeFlag
+
+    import divisualisation.errors as errors_mod
+    from divisualisation._widget import SpacetimeWidget
+
+    viewer = make_napari_viewer()
+    viewer.add_image(np.zeros((4, 20, 20)), name="raw")
+    _add_dividing_gt(viewer, name="GT tracks")
+    _add_dividing_gt(viewer, name="predicted tracks")
+    viewer.add_labels(np.zeros((4, 20, 20), int), name="gt masks")
+    viewer.add_labels(np.zeros((4, 20, 20), int), name="pred masks")
+
+    seen = {}
+
+    def fake_compute(v, gt_t, gt_l, pred_t, pred_l, **kw):
+        seen["gt_graph"] = dict(gt_t.graph)  # graph visible at compute time
+        out = {}
+        for flag in (EdgeFlag.CTC_FALSE_NEG, EdgeFlag.CTC_FALSE_POS):
+            out[flag] = v.add_tracks(
+                np.array([[1, 0, 2, 3], [1, 1, 2, 3]], float), name=str(flag.value)
+            )
+        return out
+
+    monkeypatch.setattr(errors_mod, "compute_edge_errors_from_layers", fake_compute)
+
+    w = SpacetimeWidget(viewer)
+    w._division_edges.value = True
+    w._lift_errors.value = True
+    # While active the GT layer's graph is zeroed for the colored overlay...
+    assert not dict(viewer.layers["GT tracks"].graph)
+
+    w._on_compute()
+    # ...but compute saw the real division graph, not the empty one.
+    assert seen["gt_graph"]  # non-empty: divisions present
+    # Edges are rebuilt after compute and GT is re-suppressed.
+    assert any(ly.name.endswith("division edges") for ly in viewer.layers)
+
+
 def test_camera_shared_display_per_view(make_napari_viewer):
     import numpy as np
 
