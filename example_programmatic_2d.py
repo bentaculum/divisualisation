@@ -33,6 +33,14 @@ from divisualisation.utils import (
 logging.basicConfig(level=logging.INFO)
 pp = pprint.PrettyPrinter(indent=4)
 
+# Color the parent->daughter division edges (the interactive plugin's "Color
+# division edges" checkbox, done functionally here). napari draws a Tracks
+# layer's native graph edges in a fixed, uncolorable white; keeping the shared
+# division node in each daughter chain instead draws the division edge as part
+# of the daughter's colored tail. We then turn off the layer's native (white)
+# graph edges so only the colored ones show.
+COLOR_DIVISION_EDGES = True
+
 
 gt = load_ctc_data("data/bacteria/TRA", "data/bacteria/TRA/man_track.txt", name="gt")
 pred = load_ctc_data("data/bacteria/RES", "data/bacteria/RES/man_track.txt", name="res")
@@ -62,12 +70,19 @@ viewer.add_image(img, name="raw", colormap="gray")
 viewer.add_labels(pred.segmentation, name="pred masks", opacity=0.3)
 
 for graph, name in ((gt_graph, "GT tracks"), (pred_graph, "predicted tracks")):
+    # With COLOR_DIVISION_EDGES on, keep the shared division node in each child
+    # chain so the division edge is drawn as colored tail; otherwise drop it and
+    # let napari draw the (white) graph edge.
     tracks, tracks_graph, _ = graph_to_napari_tracks(
         graph.graph,
         include_z=False,
-        drop_division_duplicates=True,
+        drop_division_duplicates=not COLOR_DIVISION_EDGES,
     )
-    viewer.add_tracks(tracks, graph=tracks_graph, name=name, tail_length=5)
+    layer = viewer.add_tracks(tracks, graph=tracks_graph, name=name, tail_length=5)
+    if COLOR_DIVISION_EDGES:
+        # The division edges now live in the colored tail; hide the layer's
+        # redundant native white graph edges.
+        layer.display_graph = False
 
 # Add the false-negative / false-positive edge overlays (each its own Tracks
 # layer, named after its EdgeFlag, e.g. "ctc_fn" / "ctc_fp").

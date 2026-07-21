@@ -104,6 +104,10 @@ _NON_DISPLAY_ATTRS = frozenset({
     "axis_labels",
     "projection_mode",
     "display_id",
+    # The widget owns display_graph: it toggles it off to hide a source layer's
+    # native white graph edges when drawing its own colored division edges. The
+    # engine must not snapshot/remember/re-apply it, or it would clobber that.
+    "display_graph",
     "visible",
 })
 

@@ -83,9 +83,9 @@ class SpacetimeWidget(Container):
         # division edges (keyed by role; the layer OBJECT is the identity we act
         # on, never its name -- napari uniquifies / the user can rename).
         self._division_edge_layers: dict = {}
-        # Source role layers whose native (white) graph we suppressed while the
-        # colored edges are shown, mapped to the graph we must restore. Keyed by
-        # the layer object.
+        # Source role layers whose native (white) graph edges we turned off while
+        # the colored overlay is shown, mapped to their prior ``display_graph``
+        # value to restore. Keyed by the layer object.
         self._suppressed_graphs: dict = {}
         # One lift engine per toggle view, so each view keeps its own
         # layer-control settings. They share a camera store, so the camera
@@ -413,9 +413,9 @@ class SpacetimeWidget(Container):
 
         MUST be called while the lift is reverted (reads flat source data) and
         before ``engine.apply`` (so the new layers are lifted with everything
-        else). Suppresses each source layer's own (white) graph edges while ours
-        are shown; the suppression is restored by the engine's revert snapshot
-        and, defensively, by ``_teardown_division_edges``.
+        else). Turns off each source layer's native (white) graph edges via its
+        ``display_graph`` toggle while ours are shown; restored by
+        ``_teardown_division_edges``.
         """
         self._teardown_division_edges()
         if not self._division_edges.value:
@@ -438,11 +438,16 @@ class SpacetimeWidget(Container):
                     opacity=1.0,
                 )
                 self._division_edge_layers[role] = edge_layer
-                # Hide the source layer's native white graph edges while our
-                # colored ones stand in; remember the graph to restore on revert.
-                if layer not in self._suppressed_graphs and dict(layer.graph):
-                    self._suppressed_graphs[layer] = dict(layer.graph)
-                    layer.graph = {}
+                # Turn off the source layer's native white graph edges (the layer
+                # control's "graph" checkbox) while our colored ones stand in;
+                # remember the prior value to restore on teardown. The engine
+                # excludes display_graph from its snapshot (see lift.py), so this
+                # survives engine.apply and isn't clobbered. Using display_graph
+                # rather than emptying .graph keeps the graph intact for anything
+                # that reads it (e.g. CTC matching in Compute).
+                if layer not in self._suppressed_graphs:
+                    self._suppressed_graphs[layer] = layer.display_graph
+                    layer.display_graph = False
 
     def _restyle_division_edges(self):
         """Re-apply each edge layer's role tail width after a lift.
@@ -457,24 +462,21 @@ class SpacetimeWidget(Container):
             edge_layer.tail_width = 2 * width_factor
 
     def _teardown_division_edges(self):
-        """Remove our edge layers and restore any suppressed source graphs.
+        """Remove our edge layers and re-enable any suppressed native graph edges.
 
-        Safe to call whether or not a lift is active. Restoring graphs here is
-        belt-and-suspenders: the engine's revert already restores them from its
-        snapshot, but a source layer may have been deselected (and so not
-        reverted through that path).
+        Safe to call whether or not a lift is active. This is the authoritative
+        restore path for ``display_graph``: the engine snapshots display attrs
+        BEFORE we suppress (so its own revert restores the already-off value),
+        and a role deselected while active is never reverted through the engine
+        at all. So we always put ``display_graph`` back here.
         """
         for edge_layer in list(self._division_edge_layers.values()):
             if edge_layer in self._viewer.layers:
                 self._viewer.layers.remove(edge_layer)
         self._division_edge_layers.clear()
-        # Put back each source layer's real graph (we only ever zeroed a graph we
-        # first stashed here, and the layer keeps its track ids, so the reassign
-        # is always valid). This is the authoritative restore path -- it also
-        # covers a role deselected while active, which the engine never reverts.
-        for layer, graph in list(self._suppressed_graphs.items()):
+        for layer, display_graph in list(self._suppressed_graphs.items()):
             if layer in self._viewer.layers:
-                layer.graph = graph
+                layer.display_graph = display_graph
         self._suppressed_graphs.clear()
 
     # --- layer discovery ----------------------------------------------------
