@@ -32,7 +32,10 @@ dependencies = [
     "magicgui",
     "numpy",
     "networkx",
-    "traccuracy",
+    # load_napari_data is not yet in a traccuracy release; pin to the open PR
+    # branch that adds it (live-image-tracking-tools/traccuracy#358). Switch back
+    # to a versioned release ("traccuracy>=<ver>") once that PR is merged and cut.
+    "traccuracy @ git+https://github.com/live-image-tracking-tools/traccuracy.git@feature/from-napari-loader",
 ]
 
 [project.entry-points."napari.manifest"]
