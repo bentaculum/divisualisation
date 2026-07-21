@@ -7,7 +7,13 @@ workflows via two toggle switches sharing one lift-amount slider:
   "spacetime" view, keeping each layer's own coloring.
 - **Divisualisation**: declare the GT / predicted / FN-edge / FP-edge tracks
   layers by role (name-guessed), optionally compute the CTC edge errors from the
-  GT/pred tracks + segmentation labels, and lift with the error-view look.
+  GT/pred tracks + segmentation labels, and lift with the error-view look. Only
+  the layers picked in the role / labels dropdowns stay visible (the predicted
+  tracks are hidden by default too); every other layer is hidden while lifted
+  and restored on toggle-off.
+
+The role / labels dropdowns and Compute button are always shown, even before the
+Divisualisation toggle is on, so layers can be picked up front.
 
 Additive: the functional API works without it.
 """
@@ -110,7 +116,7 @@ class SpacetimeWidget(Container):
         self._viewer.layers.events.inserted.connect(self._refresh_choices)
         self._viewer.layers.events.removed.connect(self._refresh_choices)
         self._refresh_choices()
-        self._update_error_controls_visibility()
+        self._show_error_controls()
         # add_dock_widget resets combo values right after __init__; re-guess on
         # the next event-loop tick so the dropdowns are usable immediately.
         QTimer.singleShot(0, self._refresh_choices)
@@ -129,31 +135,60 @@ class SpacetimeWidget(Container):
         if self._lift_errors.value:
             if self._lift_all.value:  # enforce mutual exclusivity
                 self._lift_all.value = False
+            # _apply_lift hides every non-selected layer for the errors engine.
             self._apply_lift(self._lift_errors_engine, self._roles_target())
-            # Default the Divisualisation view to hiding the predicted-tracks
-            # layer (its errors are shown by the FN/FP overlays); remember its
-            # prior visibility to restore on toggle-off.
-            self._hide_predicted()
         else:
-            self._restore_predicted()
+            self._restore_hidden()
             if not self._lift_all.value:
                 self._revert_lift()
-        self._update_error_controls_visibility()
 
-    def _hide_predicted(self):
-        name = self._role_combos["pred"].value
-        if name and name != _NONE_CHOICE and name in self._viewer.layers:
-            layer = self._viewer.layers[name]
-            self._pred_prior_visible = (name, layer.visible)
+    def _selected_layer_names(self):
+        """Names picked in any role or labels dropdown (the layers the
+        Divisualisation view keeps visible).
+        """
+        selected = set()
+        for combo in (*self._role_combos.values(), self._gt_labels, self._pred_labels):
+            name = combo.value
+            if name and name != _NONE_CHOICE:
+                selected.add(name)
+        return selected
+
+    def _hide_unselected(self):
+        """Hide every layer not picked in a dropdown, remembering prior
+        visibility so toggle-off can restore it.
+
+        The predicted-tracks layer is hidden even when it fills the ``pred``
+        role: its errors are shown by the FN/FP overlays, so the error view
+        defaults to hiding it.
+        """
+        keep = self._selected_layer_names()
+        pred = self._role_combos["pred"].value
+        if pred and pred != _NONE_CHOICE:
+            keep.discard(pred)  # predicted tracks stay hidden even as a role
+        # Snapshot once per hide session; don't clobber an existing snapshot on
+        # a live re-apply (that would record the already-hidden state).
+        if not hasattr(self, "_prior_visible") or self._prior_visible is None:
+            self._prior_visible = {}
+        for layer in self._viewer.layers:
+            if layer.name in keep:
+                # A previously hidden layer that is now selected: show it and
+                # forget its snapshot so we don't re-hide/restore it wrongly.
+                if layer.name in self._prior_visible:
+                    layer.visible = self._prior_visible.pop(layer.name)
+                continue
+            if layer.name not in self._prior_visible:
+                self._prior_visible[layer.name] = layer.visible
             layer.visible = False
 
-    def _restore_predicted(self):
-        prior = getattr(self, "_pred_prior_visible", None)
-        if prior is not None:
-            name, was_visible = prior
+    def _restore_hidden(self):
+        prior = getattr(self, "_prior_visible", None)
+        if not prior:
+            self._prior_visible = None
+            return
+        for name, was_visible in prior.items():
             if name in self._viewer.layers:
                 self._viewer.layers[name].visible = was_visible
-            self._pred_prior_visible = None
+        self._prior_visible = None
 
     def _apply_lift(self, engine, target):
         # Revert whichever engine is currently active so switching modes (and
@@ -167,14 +202,16 @@ class SpacetimeWidget(Container):
         # role mapping (those get error-view colors); every other tracks layer
         # (incl. hidden, non-role ones) is lifted too, keeping its own coloring.
         engine.apply(target, extra_layers=self._all_tracks_target())
-        self._update_error_controls_visibility()
+        # In the Divisualisation view, keep only the selected layers visible.
+        # Re-run on every apply so changing a dropdown updates what's hidden.
+        if engine is self._lift_errors_engine:
+            self._hide_unselected()
 
     def _revert_lift(self):
         for e in (self._lift_all_engine, self._lift_errors_engine):
             if e.applied:
                 e.revert()
         self._refresh_choices()
-        self._update_error_controls_visibility()
 
     def _on_lift_amount(self, *_):
         for e in (self._lift_all_engine, self._lift_errors_engine):
@@ -202,14 +239,15 @@ class SpacetimeWidget(Container):
         if self._lift_errors.value and self._lift_errors_engine.applied:
             self._apply_lift(self._lift_errors_engine, self._roles_target())
 
-    def _update_error_controls_visibility(self):
-        # Error controls are visible and editable whenever the Divisualisation
-        # workflow is on; changing a role/label dropdown re-applies the lift
-        # live (see _on_role_changed). Compute is likewise always clickable.
-        visible = self._lift_errors.value
+    def _show_error_controls(self):
+        # The role / labels dropdowns and Compute button are always visible and
+        # editable, even before the Divisualisation toggle is on, so the user can
+        # pick layers up front. Changing a role/label dropdown re-applies the
+        # lift live only while the Divisualisation workflow is active (see
+        # _on_role_changed); Compute works regardless.
         for w in self._error_controls:
-            w.visible = visible
-            w.enabled = visible
+            w.visible = True
+            w.enabled = True
 
     # --- layer discovery ----------------------------------------------------
 
