@@ -7,7 +7,7 @@ contributions:
   commands:
     - id: divisualisation.spacetime
       python_name: divisualisation._widget:SpacetimeWidget
-      title: Lift tracks
+      title: Lift tracks & Divisualisation
   widgets:
     - command: divisualisation.spacetime
-      display_name: Lift tracks
+      display_name: Lift tracks & Divisualisation

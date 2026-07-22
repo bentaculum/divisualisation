@@ -141,6 +141,6 @@ for graph, name in ((gt_graph, "GT tracks"), (pred_graph, "predicted tracks")):
 # directly, as the flat functional API.)
 
 # Dock the plugin widget so you can toggle + play interactively.
-viewer.window.add_plugin_dock_widget("divisualisation", "Lift tracks")
+viewer.window.add_plugin_dock_widget("divisualisation", "Lift tracks & Divisualisation")
 
 napari.run()
