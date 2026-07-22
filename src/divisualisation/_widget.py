@@ -38,7 +38,7 @@ from magicgui.widgets.bases import ValueWidget
 from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
 from superqt import QToggleSwitch
 
-from .lift import ROLES, SpacetimeLift, _is_tracks
+from .lift import ROLES, SpacetimeLift, _is_labels, _is_tracks
 
 logger = logging.getLogger(__name__)
 
@@ -354,15 +354,31 @@ class SpacetimeWidget(Container):
         (their errors show via the FN/FP overlays), so drawing their division
         edges would just add hidden clutter.
         """
+        layer_names = [ly.name for ly in self._viewer.layers]
         for role, combo in self._role_combos.items():
             if role == "pred":
                 continue
             name = combo.value
-            if not name or name == _NONE_CHOICE or name not in self._viewer.layers:
+            if not name or name == _NONE_CHOICE:
+                continue
+            if name not in self._viewer.layers:
+                logger.warning(
+                    "[divedges] role %s=%r not found in viewer layers %s",
+                    role,
+                    name,
+                    layer_names,
+                )
                 continue
             layer = self._viewer.layers[name]
-            if _is_tracks(layer):
-                yield role, layer
+            if not _is_tracks(layer):
+                logger.warning(
+                    "[divedges] role %s=%r is not a Tracks layer (type=%s)",
+                    role,
+                    name,
+                    type(layer).__name__,
+                )
+                continue
+            yield role, layer
 
     @staticmethod
     def _division_connection_rows(layer):
@@ -551,11 +567,7 @@ class SpacetimeWidget(Container):
         return [layer.name for layer in self._viewer.layers if _is_tracks(layer)]
 
     def _labels_layer_names(self):
-        return [
-            layer.name
-            for layer in self._viewer.layers
-            if type(layer).__name__ == "Labels"
-        ]
+        return [layer.name for layer in self._viewer.layers if _is_labels(layer)]
 
     # magicgui ``choices`` callables -- receive the ComboBox and return its
     # current options. Used so napari's reset_choices re-derives live choices on
