@@ -577,6 +577,36 @@ def test_division_edges_checkbox_live_toggle(make_napari_viewer):
     assert gt.data.shape[1] == 5  # still lifted
 
 
+def test_division_edges_checkbox_preserves_visibility(make_napari_viewer):
+    # Toggling the color-edges checkbox must NOT change layer visibility (it must
+    # not re-hide the predicted layer the way the Divisualisation toggle does).
+    import numpy as np
+
+    from divisualisation._widget import SpacetimeWidget
+
+    viewer = make_napari_viewer()
+    viewer.add_image(np.zeros((4, 20, 20)), name="raw")
+    _add_dividing_gt(viewer, name="GT tracks")
+    _add_dividing_gt(viewer, name="predicted tracks")
+
+    w = SpacetimeWidget(viewer)
+    w._role_combos["gt"].value = "GT tracks"
+    w._role_combos["pred"].value = "predicted tracks"
+    w._division_edges.value = True
+    w._lift_errors.value = True
+    # Divisualisation hides pred by default; the user then shows it.
+    assert viewer.layers["predicted tracks"].visible is False
+    viewer.layers["predicted tracks"].visible = True
+
+    # Toggling the coloring checkbox leaves visibility exactly as-is.
+    w._division_edges.value = False
+    assert viewer.layers["predicted tracks"].visible is True
+    assert viewer.layers["GT tracks"].visible is True
+    w._division_edges.value = True
+    assert viewer.layers["predicted tracks"].visible is True
+    assert viewer.layers["GT tracks"].visible is True
+
+
 def test_division_edges_keep_layer_coloring(make_napari_viewer):
     import numpy as np
 

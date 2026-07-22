@@ -203,7 +203,13 @@ class SpacetimeWidget(Container):
             active,
         )
         if active:
-            self._apply_lift(self._lift_errors_engine, self._roles_target())
+            # A coloring change must not alter layer visibility (e.g. re-hide the
+            # predicted layer) the way the Divisualisation toggle does.
+            self._apply_lift(
+                self._lift_errors_engine,
+                self._roles_target(),
+                preserve_visibility=True,
+            )
 
     def _selected_layer_names(self):
         """Names picked in any role or labels dropdown (the layers the
@@ -256,7 +262,23 @@ class SpacetimeWidget(Container):
                 self._viewer.layers[name].visible = was_visible
         self._prior_visible = None
 
-    def _apply_lift(self, engine, target):
+    def _apply_lift(self, engine, target, preserve_visibility=False):
+        """Revert any active lift, (re)build division edges, and apply ``engine``.
+
+        ``preserve_visibility``: when True, keep each tracks layer's current
+        visibility across the revert/apply churn and skip the ``_hide_unselected``
+        pass. Used when a re-apply is driven by a *coloring* change (the "Color
+        division edges" checkbox), which must not re-hide layers the way a
+        Divisualisation toggle or role change does.
+        """
+        # Snapshot current visibility BEFORE the revert/apply cycle, which resets
+        # layer data (and can disturb visibility), so a coloring-only re-apply
+        # leaves what the user is looking at untouched.
+        visible_before = (
+            {ly.name: ly.visible for ly in self._viewer.layers if _is_tracks(ly)}
+            if preserve_visibility
+            else None
+        )
         # Revert whichever engine is currently active so switching modes (and
         # engines) rebuilds cleanly; the shared camera carries over.
         for e in (self._lift_all_engine, self._lift_errors_engine):
@@ -280,9 +302,15 @@ class SpacetimeWidget(Container):
         # display_graph change and force a redraw so re-augmented layers render at
         # their folded (lifted) positions rather than the flat z=0 plane.
         self._finalize_division_edges()
-        # In the Divisualisation view, keep only the selected layers visible.
-        # Re-run on every apply so changing a dropdown updates what's hidden.
-        if engine is self._lift_errors_engine:
+        if visible_before is not None:
+            # Coloring-only re-apply: restore exactly the visibility we had,
+            # don't re-run the hide policy.
+            for ly in self._viewer.layers:
+                if ly.name in visible_before:
+                    ly.visible = visible_before[ly.name]
+        elif engine is self._lift_errors_engine:
+            # In the Divisualisation view, keep only the selected layers visible.
+            # Re-run on every apply so changing a dropdown updates what's hidden.
             self._hide_unselected()
 
     def _revert_lift(self):
