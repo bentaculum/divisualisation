@@ -339,8 +339,18 @@ class SpacetimeLift:
 
     @staticmethod
     def _snapshot_layer(layer) -> dict:
+        # Snapshot the data so revert can reassign it. The lift only ever
+        # REASSIGNS a layer's .data (folding tracks, expanding image/labels to a
+        # volume) -- it never mutates the array in place -- so we can keep a
+        # reference for the big image/labels volumes instead of deep-copying
+        # them. Tracks data is small and gets rebuilt, so copy it for isolation.
+        # (deepcopy of a multi-hundred-MB label array was ~half the toggle time.)
+        if _is_tracks(layer):
+            snap_data = np.asarray(layer.data).copy()
+        else:
+            snap_data = layer.data
         snap = {
-            "data": copy.deepcopy(layer.data),
+            "data": snap_data,
             "scale": tuple(layer.scale),
             "translate": tuple(layer.translate),
             "clipping_planes": copy.deepcopy([

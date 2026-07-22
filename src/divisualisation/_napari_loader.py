@@ -20,7 +20,6 @@ from typing import TYPE_CHECKING
 
 import networkx as nx
 import numpy as np
-from scipy.ndimage import center_of_mass
 from scipy.optimize import linear_sum_assignment
 
 # Vendored from traccuracy PR #358 (live-image-tracking-tools/traccuracy#358),
@@ -81,6 +80,29 @@ def _labels_from_positions(
     return seg_ids
 
 
+def _mask_centroids(frame: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Per-label centroids of one segmentation frame, vectorized.
+
+    Returns ``(labels, centroids)`` where ``labels`` is the sorted non-zero
+    label ids and ``centroids[i]`` is label ``labels[i]``'s mean coordinate (in
+    the frame's ``(z,)y,x`` axis order). One pass over the non-zero voxels via
+    ``np.bincount`` -- ~10x faster than ``scipy.ndimage.center_of_mass`` per
+    label, which matters on large 3D+t volumes (this is the compute hot spot).
+    CHANGED vs upstream traccuracy#358, which used ``center_of_mass``.
+    """
+    coords = np.nonzero(frame)  # tuple of ndim index arrays over non-zero voxels
+    ids = frame[coords].astype(np.intp)
+    if len(ids) == 0:
+        return np.empty(0, dtype=int), np.empty((0, frame.ndim))
+    counts = np.bincount(ids)
+    centroids = np.empty((len(counts), frame.ndim))
+    for d, coord in enumerate(coords):
+        centroids[:, d] = np.bincount(ids, weights=coord.astype(float))
+    labels = np.nonzero(counts)[0]  # sorted non-zero label ids
+    centroids = centroids[labels] / counts[labels, None]
+    return labels.astype(int), centroids
+
+
 def _labels_by_matching(
     data: np.ndarray, segmentation: np.ndarray, ndim: int
 ) -> np.ndarray:
@@ -114,15 +136,12 @@ def _labels_by_matching(
     for t in np.unique(times):
         rows = np.nonzero(times == t)[0]
         frame = segmentation[int(t)]
-        labels = np.unique(frame)
-        labels = labels[labels != 0]  # drop background
+        labels, coms = _mask_centroids(frame)  # labels (M,), coms (M, ndim)
         if len(labels) == 0:
             raise ValueError(
                 f"frame {int(t)} has {len(rows)} detection(s) but no "
                 "segmentation masks to match them to."
             )
-        # Mask centers of mass, in the same (z,)y,x coordinate order as data[:, 2:].
-        coms = np.asarray(center_of_mass(frame > 0, frame, labels))  # (M, ndim)
         points = data[rows, 2:].astype(float)  # (K, ndim)
         # Cost = pairwise Euclidean distance (K detections x M masks).
         cost = np.linalg.norm(points[:, None, :] - coms[None, :, :], axis=2)

@@ -491,16 +491,27 @@ class SpacetimeWidget(Container):
         if not graph:
             return None
         data = np.asarray(layer.data, dtype=float)  # [track_id, t, (z,) y, x]
-        track_ids = data[:, 0]
+        if len(data) == 0:
+            return None
 
-        def last_vertex(track_id):
-            rows = data[track_ids == track_id]
-            return None if len(rows) == 0 else rows[np.argmax(rows[:, 1])]
+        # Precompute each track's LAST vertex (max time) in one vectorized pass,
+        # rather than re-scanning the whole array per division (which was
+        # O(divisions x vertices)). Sort by (track_id, t); the last row of each
+        # track_id group is its last vertex.
+        order = np.lexsort((data[:, 1], data[:, 0]))  # by track_id, then t
+        sorted_data = data[order]
+        sorted_ids = sorted_data[:, 0]
+        # A row is the last of its group iff the next row has a different id.
+        is_last = np.empty(len(sorted_data), dtype=bool)
+        is_last[-1] = True
+        is_last[:-1] = sorted_ids[1:] != sorted_ids[:-1]
+        last_rows = sorted_data[is_last]
+        last_by_track = {int(r[0]): r for r in last_rows}
 
         rows = []
         for child, parents in graph.items():
             for parent in np.atleast_1d(parents):
-                parent_last = last_vertex(int(parent))
+                parent_last = last_by_track.get(int(parent))
                 if parent_last is None:
                     continue
                 # Daughter id, at the parent's last position -> extends the
