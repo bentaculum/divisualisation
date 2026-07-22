@@ -241,6 +241,50 @@ def test_compute_during_lift_reapplies_and_keeps_dropdowns(
     assert viewer.layers[fp].visible
 
 
+def test_compute_passes_gt_spatial_scale_to_error_overlays(
+    make_napari_viewer, monkeypatch
+):
+    # The error overlays must inherit the GT tracks layer's SPATIAL scale (e.g.
+    # an anisotropic z shown 10x) so they align with the data instead of
+    # rendering at unit scale in the wrong z plane.
+    import numpy as np
+    from traccuracy import EdgeFlag
+
+    import divisualisation.errors as errors_mod
+    from divisualisation._widget import SpacetimeWidget
+
+    viewer = make_napari_viewer()
+    viewer.add_image(np.zeros((4, 3, 8, 8), np.uint8), name="raw", scale=(1, 10, 1, 1))
+    for nm in ("GT tracks", "predicted tracks"):
+        viewer.add_tracks(
+            np.array([[1, t, 1, 2, 3] for t in range(4)], float),
+            name=nm,
+            scale=(1, 10, 1, 1),  # (t, z, y, x)
+        )
+    viewer.add_labels(np.zeros((4, 3, 8, 8), int), name="gt masks", scale=(1, 10, 1, 1))
+    viewer.add_labels(
+        np.zeros((4, 3, 8, 8), int), name="pred masks", scale=(1, 10, 1, 1)
+    )
+
+    seen = {}
+
+    def fake_compute(v, gt_t, gt_l, pred_t, pred_l, **kw):
+        seen["scale"] = kw.get("scale")
+        return {f: None for f in (EdgeFlag.CTC_FALSE_NEG, EdgeFlag.CTC_FALSE_POS)}
+
+    monkeypatch.setattr(errors_mod, "compute_edge_errors_from_layers", fake_compute)
+
+    w = SpacetimeWidget(viewer)
+    w._role_combos["gt"].value = "GT tracks"
+    w._role_combos["pred"].value = "predicted tracks"
+    w._gt_labels.value = "gt masks"
+    w._pred_labels.value = "pred masks"
+    w._on_compute()
+
+    # Spatial part of (t, z, y, x) -> (z, y, x); z carries the 10x.
+    assert seen["scale"] == (10.0, 1.0, 1.0)
+
+
 def test_compute_with_division_edges_sees_real_graph(make_napari_viewer, monkeypatch):
     # Regression: with colored division edges on, the GT layer is augmented in
     # place (its graph moves into the tail). Computing errors must see the layer

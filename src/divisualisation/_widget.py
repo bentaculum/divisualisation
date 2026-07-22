@@ -812,6 +812,21 @@ class SpacetimeWidget(Container):
         # trailing _apply_lift re-augments them.
         self._teardown_division_edges()
 
+        # Give the error overlays the same SPATIAL scale as the GT tracks layer
+        # (e.g. an anisotropic z shown 10x), so they align with the image/tracks
+        # instead of rendering at unit scale in a wrong z plane. A Tracks layer's
+        # scale is (t, (z,) y, x); add_edge_error_tracks wants a spatial-only
+        # ((z,) y, x) scale, so drop the leading time entry. FN edges come from
+        # the GT graph and FP from the predicted graph -- they should carry the
+        # same scale, so warn if the two tracks layers disagree.
+        error_scale = tuple(float(s) for s in layers[gt_tracks].scale[1:])
+        pred_scale = tuple(float(s) for s in layers[pred_tracks].scale[1:])
+        if pred_scale != error_scale:
+            napari.utils.notifications.show_warning(
+                "GT and predicted tracks layers have different scales "
+                f"({error_scale} vs {pred_scale}); using the GT scale for both "
+                "error overlays. Align the layer scales to avoid a mismatch."
+            )
         # Show napari's activity dock so the loader's mask-matching progress bar
         # (routed through napari.utils.progress) is visible during the compute.
         self._show_activity_dock(True)
@@ -822,6 +837,7 @@ class SpacetimeWidget(Container):
                 layers[gt_labels],
                 layers[pred_tracks],
                 layers[pred_labels],
+                scale=error_scale,
             )
         finally:
             self._show_activity_dock(False)
