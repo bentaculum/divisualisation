@@ -269,9 +269,13 @@ def compute_edge_errors_from_layers(
     # Imported lazily so the module has no hard traccuracy-loader / heavy deps
     # at import time.
     from traccuracy import run_metrics
-    from traccuracy.loaders import load_napari_data
     from traccuracy.matchers import CTCMatcher
     from traccuracy.metrics import CTCMetrics
+
+    # load_napari_data is vendored (traccuracy PR #358 is not released yet); once
+    # it lands in a traccuracy release, switch back to
+    # ``from traccuracy.loaders import load_napari_data``.
+    from ._napari_loader import load_napari_data
 
     def to_graph(tracks, labels, name):
         # Implicit matching: pass the segmentation and let load_napari_data read

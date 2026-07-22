@@ -34,12 +34,14 @@ dependencies = [
     "magicgui",
     "numpy",
     "networkx",
-    # load_napari_data is not yet in a traccuracy release; pin to the open PR
-    # branch that adds it (live-image-tracking-tools/traccuracy#358). Switch back
-    # to a versioned release ("traccuracy>=<ver>") once that PR is merged and cut.
-    # NOTE: PyPI rejects direct git/URL dependencies, so this MUST become a
-    # versioned release before the deploy workflow can publish to PyPI.
-    "traccuracy @ git+https://github.com/live-image-tracking-tools/traccuracy.git@feature/from-napari-loader",
+    "scipy",  # used by the vendored napari loader (_napari_loader.py)
+    # load_napari_data (traccuracy PR #358) isn't in a traccuracy release yet, so
+    # it's vendored here (see divisualisation._napari_loader) and we depend on a
+    # released traccuracy instead of the PR git branch (PyPI rejects git deps).
+    # Floor is >=0.4.1: that's where the EdgeFlag string values settled to
+    # "ctc_fn"/"ctc_fp" (our error overlay layers are named after them). No upper
+    # bound. Drop the vendored loader and relax this once #358 is released.
+    "traccuracy>=0.4.1",
 ]
 
 [project.urls]

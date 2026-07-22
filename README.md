@@ -15,8 +15,17 @@ We originally introduced these visualisations to compare our results in [_Tracka
 
 ### Installation
 
-- Install napari
-- Install this repo
+Divisualisation is a [napari](https://napari.org) plugin.
+
+- Install [napari](https://napari.org/stable/tutorials/fundamentals/installation.html).
+- Install Divisualisation, either:
+  - from within napari via **Plugins → Install/Uninstall Plugins…** (search for
+    "divisualisation"), or
+  - from PyPI:
+    ```
+    pip install divisualisation
+    ```
+  - the latest development version from GitHub:
     ```
     pip install git+https://github.com/bentaculum/divisualisation.git
     ```
@@ -53,22 +62,29 @@ entry) to align the overlay with your image/labels layers. See
 `example_programmatic_2d.py`, which uses `add_edge_error_tracks` as part of a
 fully scripted render.
 
-Divisualisation also ships two optional napari dock widgets (**Plugins → Divisualisation**):
+Divisualisation also ships an optional napari dock widget,
+**Plugins → Divisualisation → Lift tracks & Divisualisation**, with two mutually
+exclusive workflows (each in its own box, with its own lift-amount slider):
 
-- **Edge error toggle** — show/hide all error layers at once.
-- **Spacetime lift** — interactively fold time into a `z` axis so the selected
-  tracks layers rise out of the moving image plane into a 3D "spacetime" cone,
-  with a live lift-amount slider. Tick which tracks layers to lift (all by
-  default), turn the toggle on, and scrub the time slider to sweep through the
-  cone; turn it off to restore the flat 2D view exactly. This is the original
-  `Divisualisation` render effect, made interactive and reversible.
+- **Lift all tracks layers** — fold time into a `z` axis so every tracks layer
+  rises out of the moving image plane into a 3D "spacetime" cone, keeping each
+  layer's own coloring. Scrub the time slider to sweep through the cone; toggle
+  off to restore the flat 2D view exactly. This is the original `Divisualisation`
+  render effect, made interactive and reversible.
+- **Divisualisation** — pick your ground-truth / predicted / FN-edge / FP-edge
+  tracks layers via the role dropdowns (auto-guessed from layer names),
+  optionally **Compute errors** from the GT/predicted tracks plus their
+  segmentation labels, and lift with the error-view coloring. A **Color division
+  edges** checkbox draws each selected layer's parent→daughter division edges as
+  coloured track tails (napari otherwise draws them in a fixed, uncolourable
+  white).
 
 #### Examples
 
 Run `example_2d.py` (bacteria) or `example_3d.py` (C. elegans nuclei) in ipython.
 Each loads its data into a napari viewer with the tracks and edge-error overlays
-and docks the plugin widgets, so you can toggle the spacetime lift and play the
-time slider yourself.
+and docks the widget, so you can toggle the lift and play the time slider
+yourself.
 
 #### Rendering an animation
 

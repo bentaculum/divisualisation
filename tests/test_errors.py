@@ -226,18 +226,18 @@ def test_compute_edge_errors_implicit_matching_finds_fn(viewer_model):
 def test_compute_edge_errors_calls_loader_without_seg_id_key(viewer_model, monkeypatch):
     # Guard the implicit-matching contract: the loader is called with a
     # segmentation and WITHOUT seg_id_key (which would force explicit matching).
-    # load_napari_data is imported lazily inside the function (from
-    # traccuracy.loaders), so patch it at that source.
-    import traccuracy.loaders as loaders_mod
+    # load_napari_data is imported lazily inside the function from the vendored
+    # module (divisualisation._napari_loader), so patch it at that source.
+    import divisualisation._napari_loader as loader_mod
 
     calls = []
-    real_loader = loaders_mod.load_napari_data
+    real_loader = loader_mod.load_napari_data
 
     def spy(*args, **kwargs):
         calls.append(kwargs)
         return real_loader(*args, **kwargs)
 
-    monkeypatch.setattr(loaders_mod, "load_napari_data", spy)
+    monkeypatch.setattr(loader_mod, "load_napari_data", spy)
 
     v = viewer_model
     pts = [(0, 2, 2), (1, 2, 3)]
