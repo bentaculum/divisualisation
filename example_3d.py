@@ -109,19 +109,30 @@ if "gt" not in locals():
     gt_graph = ctc_matched.gt_graph
     pred_graph = ctc_matched.pred_graph
 
+# The C. elegans acquisition is anisotropic (coarser z than xy), so display the
+# z axis 10x larger. This is a napari display scale only -- it does NOT change
+# the data values or voxel indices, so implicit mask-matching still works.
+# Applied consistently to image, labels and tracks so they stay aligned.
+Z_SCALE = 10
+img_scale = (1, Z_SCALE, 1, 1)  # (t, z, y, x)
+
 # A normal viewer with the real 3D volume and tracks loaded flat. No time->z fold.
 viewer = napari.Viewer()
 viewer.theme = "dark"
-viewer.add_image(img, name="raw", colormap="gray", rendering="mip")
+viewer.add_image(img, name="raw", colormap="gray", rendering="mip", scale=img_scale)
 # Both GT and predicted segmentation labels, so the plugin's "Compute errors"
 # workflow can match them.
-viewer.add_labels(gt.segmentation, name="gt masks", opacity=0.3, visible=False)
-viewer.add_labels(pred.segmentation, name="pred masks", opacity=0.3)
+viewer.add_labels(
+    gt.segmentation, name="gt masks", opacity=0.3, visible=False, scale=img_scale
+)
+viewer.add_labels(pred.segmentation, name="pred masks", opacity=0.3, scale=img_scale)
 
 # GT and predicted tracks, keeping their real z (include_z=True). Drop
 # division-node duplicates so the tracks round-trip cleanly back to a graph. No
 # per-detection segmentation id is needed: the plugin matches detections to the
 # segmentation implicitly, reading each label from the pixel under the point.
+# A 3D+t Tracks layer is 4D (t, z, y, x), so its scale matches the image's
+# (t, z, y, x) -- scale z by Z_SCALE to stay aligned with the image/labels.
 for graph, name in ((gt_graph, "GT tracks"), (pred_graph, "predicted tracks")):
     tracks, tracks_graph, _ = graph_to_napari_tracks(
         graph.graph,
@@ -133,6 +144,7 @@ for graph, name in ((gt_graph, "GT tracks"), (pred_graph, "predicted tracks")):
         graph=tracks_graph,
         name=name,
         tail_length=5,
+        scale=img_scale,  # (t, z, y, x)
     )
 
 # Errors are NOT precomputed: open Plugins -> divisualisation ->
