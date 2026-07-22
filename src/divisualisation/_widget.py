@@ -195,7 +195,7 @@ class SpacetimeWidget(Container):
         self._show_error_controls()
         # When the dock widget is torn down, restore any role layers we augmented
         # for colored division edges so they don't stay altered.
-        self.native.destroyed.connect(lambda *_: self._teardown_division_edges())
+        self.native.destroyed.connect(self._on_native_destroyed)
         # Defer the initial guess to the next event-loop tick: add_dock_widget
         # resets combo values right after __init__, so guessing synchronously
         # here would be clobbered.
@@ -662,6 +662,18 @@ class SpacetimeWidget(Container):
             layer.properties = rebuilt
         if prior_color_by in layer.properties or not layer.properties:
             layer.color_by = prior_color_by
+
+    def _on_native_destroyed(self, *_):
+        # The Qt widget is being destroyed. By this point the magicgui container
+        # may already be partially torn down (attribute access raising via its
+        # __getattr__), and the viewer may be gone, so guard the restore. Nothing
+        # to restore if we never augmented anything.
+        if not getattr(self, "_suppressed_graphs", None):
+            return
+        try:
+            self._teardown_division_edges()
+        except (AttributeError, RuntimeError):
+            pass
 
     def _teardown_division_edges(self):
         """Restore any role layers we augmented back to their original state.
