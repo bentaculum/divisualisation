@@ -30,6 +30,26 @@ def test_apply_lifts_tracks_to_five_columns(viewer_with_layers):
     assert v.dims.ndisplay == 3
 
 
+def test_fold_accounts_for_z_display_scale():
+    # A tracks layer with an anisotropic z display scale (e.g. 10x for the
+    # C. elegans volume) must fold in WORLD units: the data-space z offset is
+    # divided by the z scale, so the cone's world steepness stays == time_scale
+    # regardless of the scale (not scale-times too steep).
+    v = ViewerModel()
+    # 3D+t tracks: [id, t, z, y, x] -> 4D layer, scale (t, z, y, x).
+    data = np.array([[1, t, 0, 5, 5] for t in range(4)], float)
+    v.add_tracks(data, name="tracks", scale=(1, 10, 1, 1))
+    lift = SpacetimeLift(v, time_scale=10)
+    lift.apply(["tracks"])
+    folded = v.layers["tracks"].data
+    z_scale = float(v.layers["tracks"].scale[1])
+    # data-space offset is time_scale / z_scale per frame ...
+    np.testing.assert_allclose(folded[:, 2], -(10 / z_scale) * folded[:, 1])
+    # ... so in WORLD units (z_scale * data) it is exactly time_scale per frame.
+    world_z = z_scale * folded[:, 2]
+    np.testing.assert_allclose(world_z, -10 * folded[:, 1])
+
+
 def test_apply_expands_image_and_labels_to_volume(viewer_with_layers):
     v = viewer_with_layers
     SpacetimeLift(v).apply(["tracks"])

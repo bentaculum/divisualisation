@@ -509,6 +509,9 @@ class SpacetimeLift:
         graph = dict(layer.graph)
         properties = {k: v.copy() for k, v in layer.properties.items()}
         color_by = layer.color_by
+        # Read the z display scale BEFORE reassigning .data (which can reset the
+        # transforms when ndim changes 4->5). Honors an anisotropic z.
+        z_scale = self._z_scale(layer)
         # Setting .data clears features to just {track_id}; napari warns if the
         # active color_by is gone at that moment. Fall back to track_id first,
         # then restore the real coloring once its property is back.
@@ -518,19 +521,40 @@ class SpacetimeLift:
         # 3-col extent that crashes the 3D draw (index 3 out of bounds). Set the
         # data while momentarily visible so the extent updates, then restore the
         # layer's original visibility.
-        layer.data = self._folded(base)
+        layer.data = self._folded(base, z_scale)
         layer.graph = graph
         layer.properties = properties
         if color_by in layer.properties or not layer.properties:
             layer.color_by = color_by
 
-    def _folded(self, base: np.ndarray) -> np.ndarray:
+    def _folded(self, base: np.ndarray, z_scale: float = 1.0) -> np.ndarray:
         data = base.copy()
-        # z <- z - time_scale * t, so tracks rise out of the plane over time.
-        # The depth axis points towards the viewer since napari 0.6, so the time
-        # term is subtracted to lift upward. Preserves any real z.
-        data[:, 2] = base[:, 2] - self._time_scale * base[:, 1]
+        # z <- z - (time_scale / z_scale) * t, so tracks rise out of the plane
+        # over time. The depth axis points towards the viewer since napari 0.6,
+        # so the time term is subtracted to lift upward. Preserves any real z.
+        #
+        # Divide by the layer's z DISPLAY scale so the lift is in WORLD units:
+        # napari renders z at ``z_scale * z_data``, so with an anisotropic layer
+        # (e.g. z shown 10x for the C. elegans volume) an unscaled offset would
+        # make the cone z_scale-times too steep and mis-align the time sweep. In
+        # world space the offset is then exactly ``time_scale * t``, matching the
+        # (world-unit) clip position and translate in _update_sweep.
+        data[:, 2] = base[:, 2] - (self._time_scale / z_scale) * base[:, 1]
         return data
+
+    @staticmethod
+    def _z_scale(layer) -> float:
+        """The layer's z (depth) display scale in world units.
+
+        For a genuine 3D+t layer the scale is (t, z, y, x) and z is index 1, so
+        we honor an anisotropic z (e.g. 10x for the C. elegans volume). For a
+        2D+t layer (scale (t, y, x), len 3) z is invented by the lift and has no
+        display scale, so return 1.0. Also 1.0 if scale is unavailable.
+        """
+        scale = getattr(layer, "scale", None)
+        if scale is None or len(scale) < 4:
+            return 1.0  # 2D+t (or unknown): invented z, no anisotropy to honor
+        return float(scale[1])
 
     def _refold_tracks(self):
         # Re-folding reassigns layer.data, which resets the layer's graph AND
@@ -541,13 +565,14 @@ class SpacetimeLift:
             properties = {k: v.copy() for k, v in layer.properties.items()}
             color_by = layer.color_by
             colormap = layer.colormap
+            z_scale = self._z_scale(layer)
             # Setting .data clears features to just {track_id}, and napari warns
             # ("... not present in features. Falling back to track_id") if the
             # active color_by (e.g. a custom "_lift_*" key) is gone at that
             # moment. Point color_by at the always-present track_id first, then
             # restore the real coloring once its property is back.
             layer.color_by = "track_id"
-            layer.data = self._folded(base)
+            layer.data = self._folded(base, z_scale)
             layer.graph = graph
             layer.properties = properties
             if color_by in layer.properties or not layer.properties:
