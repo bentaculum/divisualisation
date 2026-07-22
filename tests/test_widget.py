@@ -225,11 +225,20 @@ def test_compute_during_lift_reapplies_and_keeps_dropdowns(
         assert viewer.layers[nm] in w._lift._track_bases
         assert viewer.layers[nm].data.shape[1] == 5
     fn = str(EdgeFlag.CTC_FALSE_NEG.value)
+    fp = str(EdgeFlag.CTC_FALSE_POS.value)
     assert viewer.layers[fn] in w._lift._track_bases
     assert viewer.layers[fn].color_by == "_lift_fn_edges"
     # Dropdowns still work and include the new error layers.
     assert fn in w._role_combos["fn_edges"].choices
     assert w._role_combos["gt"].enabled
+    # Compute assigns the new layers to the FN/FP role dropdowns (the combos are
+    # nested in the per-workflow box, so this relies on resetting their choices
+    # directly, not via the top-level container).
+    assert w._role_combos["fn_edges"].value == fn
+    assert w._role_combos["fp_edges"].value == fp
+    # ... and shows them by default (not swept into the hidden set).
+    assert viewer.layers[fn].visible
+    assert viewer.layers[fp].visible
 
 
 def test_compute_with_division_edges_sees_real_graph(make_napari_viewer, monkeypatch):

@@ -73,7 +73,7 @@ exclusive workflows (each in its own box, with its own lift-amount slider):
   render effect, made interactive and reversible.
 - **Divisualisation** — pick your ground-truth / predicted / FN-edge / FP-edge
   tracks layers via the role dropdowns (auto-guessed from layer names),
-  optionally **Compute errors** from the GT/predicted tracks plus their
+  optionally **Compute edge errors** from the GT/predicted tracks plus their
   segmentation labels, and lift with the error-view coloring. A **Color division
   edges** checkbox draws each selected layer's parent→daughter division edges as
   coloured track tails (napari otherwise draws them in a fixed, uncolourable

@@ -97,10 +97,12 @@ class SpacetimeWidget(Container):
         # Two mutually exclusive toggles, each shown in its own box below. The
         # lift amount is one shared value but has a slider in each box; the two
         # sliders mirror each other. ``_lift_amount`` (errors box) is canonical.
-        self._lift_all = ToggleSwitch(value=False, label="Lift all tracks layers")
-        self._lift_errors = ToggleSwitch(value=False, label="Divisualisation")
-        self._lift_amount = FloatSlider(value=12, min=0, max=99, label="lift")
-        self._lift_amount_all = FloatSlider(value=12, min=0, max=99, label="lift")
+        # Both toggles read "Lifted view" -- which workflow each drives is given
+        # by its enclosing box title ("Lift all tracks layers" / "Divisualisation").
+        self._lift_all = ToggleSwitch(value=False, label="Lifted view")
+        self._lift_errors = ToggleSwitch(value=False, label="Lifted view")
+        self._lift_amount = FloatSlider(value=12, min=1, max=50, label="Lift scale")
+        self._lift_amount_all = FloatSlider(value=12, min=1, max=50, label="Lift scale")
 
         # Error-view controls. Choices are CALLABLES (not static lists): napari's
         # add_dock_widget auto-connects layer inserted/removed/reordered/renamed
@@ -118,7 +120,7 @@ class SpacetimeWidget(Container):
         # Under the 6 role/labels dropdowns: opt-in colored division edges (see
         # module docstring). Only acts in the Divisualisation workflow.
         self._division_edges = CheckBox(value=False, label="Color division edges")
-        self._compute_btn = PushButton(text="Compute errors")
+        self._compute_btn = PushButton(text="Compute edge errors")
         # The 6 role/labels dropdowns, ordered GT / pred tracks, GT / pred labels,
         # then FN / FP edges last. _error_controls keeps every control that is
         # only meaningful in the Divisualisation workflow (used by
@@ -196,6 +198,22 @@ class SpacetimeWidget(Container):
         # resets combo values right after __init__, so guessing synchronously
         # here would be clobbered.
         QTimer.singleShot(0, self._guess_once)
+        # napari titles the dock "<widget> (<plugin>)" -- e.g. "Lift tracks &
+        # Divisualisation (Divisualisation)". Override it to just the widget name.
+        # Deferred: the QDockWidget parent only exists after add_dock_widget runs.
+        QTimer.singleShot(0, self._set_dock_title)
+
+    def _set_dock_title(self):
+        # Walk up to the enclosing QDockWidget and drop napari's " (plugin)"
+        # suffix from its title. Best-effort: if the widget isn't docked (e.g.
+        # constructed standalone in a test), there's nothing to retitle.
+        from qtpy.QtWidgets import QDockWidget
+
+        parent = self.native.parent()
+        while parent is not None and not isinstance(parent, QDockWidget):
+            parent = parent.parent()
+        if isinstance(parent, QDockWidget):
+            parent.setWindowTitle("Lift tracks & Divisualisation")
 
     # --- toggles ------------------------------------------------------------
 
@@ -680,6 +698,16 @@ class SpacetimeWidget(Container):
     def _label_choices(self, *_):
         return [_NONE_CHOICE, *self._labels_layer_names()]
 
+    def _reset_role_choices(self):
+        """Re-derive every role/labels combo's choices from the current layers.
+
+        Reset each combo directly rather than via ``self.reset_choices()``: the
+        combos are nested inside the per-workflow box Containers, so the
+        top-level container's reset_choices does not reach them.
+        """
+        for combo in (*self._role_combos.values(), self._gt_labels, self._pred_labels):
+            combo.reset_choices()
+
     @staticmethod
     def _guess(names, hints, already):
         for name in names:
@@ -708,7 +736,7 @@ class SpacetimeWidget(Container):
             # Make sure the combos list the current layers before we assign
             # guesses -- our inserted handler may run before napari's own
             # reset_choices for the same event.
-            self.reset_choices()
+            self._reset_role_choices()
             assigned: set[str] = set()
             for role in ROLES:
                 combo = self._role_combos[role]
@@ -777,7 +805,7 @@ class SpacetimeWidget(Container):
             "fp_edges": EdgeFlag.CTC_FALSE_POS,
         }
         with self._suspend_role_events():
-            self.reset_choices()
+            self._reset_role_choices()
             for role, flag in role_by_flag.items():
                 layer = error_layers.get(flag)
                 if layer is not None and layer.name in self._role_combos[role].choices:
