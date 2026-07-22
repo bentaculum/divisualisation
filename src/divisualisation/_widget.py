@@ -174,7 +174,7 @@ class SpacetimeWidget(Container):
             self._revert_lift()
 
     def _on_toggle_errors(self, *_):
-        logger.info(
+        logger.debug(
             "[divedges] Divisualisation toggled -> %s (color-edges checkbox=%s)",
             self._lift_errors.value,
             self._division_edges.value,
@@ -197,7 +197,7 @@ class SpacetimeWidget(Container):
         # apply transaction so edges are (re)built or torn down with the correct
         # revert -> build-from-flat -> apply ordering.
         active = self._lift_errors.value and self._lift_errors_engine.applied
-        logger.info(
+        logger.debug(
             "[divedges] checkbox changed -> %s (divisualisation active=%s)",
             self._division_edges.value,
             active,
@@ -392,7 +392,7 @@ class SpacetimeWidget(Container):
             if not name or name == _NONE_CHOICE:
                 continue
             if name not in self._viewer.layers:
-                logger.warning(
+                logger.debug(
                     "[divedges] role %s=%r not found in viewer layers %s",
                     role,
                     name,
@@ -401,7 +401,7 @@ class SpacetimeWidget(Container):
                 continue
             layer = self._viewer.layers[name]
             if not _is_tracks(layer):
-                logger.warning(
+                logger.debug(
                     "[divedges] role %s=%r is not a Tracks layer (type=%s)",
                     role,
                     name,
@@ -460,17 +460,17 @@ class SpacetimeWidget(Container):
         back by ``_teardown_division_edges``.
         """
         self._teardown_division_edges()
-        logger.info(
+        logger.debug(
             "[divedges] rebuild: checkbox=%s errors_toggle=%s engine_applied=%s",
             self._division_edges.value,
             self._lift_errors.value,
             self._lift_errors_engine.applied,
         )
         if not self._division_edges.value:
-            logger.info("[divedges] checkbox off -> nothing to do")
+            logger.debug("[divedges] checkbox off -> nothing to do")
             return
         selected = list(self._selected_role_layers())
-        logger.info(
+        logger.debug(
             "[divedges] role values=%s -> selected layers=%s",
             {r: c.value for r, c in self._role_combos.items()},
             [layer.name for _r, layer in selected],
@@ -487,7 +487,7 @@ class SpacetimeWidget(Container):
         augmented_any = False
         for _role, layer in selected:
             rows = self._division_connection_rows(layer)
-            logger.info(
+            logger.debug(
                 "[divedges] %r (role=%s): graph_size=%d, ndata=%d, connection_rows=%s",
                 layer.name,
                 _role,
@@ -517,7 +517,7 @@ class SpacetimeWidget(Container):
             # Divisions are in the colored tail now; hide the native white edges.
             layer.display_graph = False
             augmented_any = True
-            logger.info(
+            logger.debug(
                 "[divedges] %r augmented -> ndata=%d, display_graph=%s, color_by=%s",
                 layer.name,
                 len(layer.data),
@@ -597,7 +597,7 @@ class SpacetimeWidget(Container):
         its own revert would otherwise keep the augmented data.
         """
         if self._suppressed_graphs:
-            logger.info(
+            logger.debug(
                 "[divedges] teardown: restoring %d layer(s): %s",
                 len(self._suppressed_graphs),
                 [layer.name for layer in self._suppressed_graphs],
