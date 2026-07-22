@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 import networkx as nx
 import numpy as np
 from scipy.optimize import linear_sum_assignment
+from tqdm import tqdm  # ADDED vs upstream traccuracy#358: per-frame progress bar
 
 # Vendored from traccuracy PR #358 (live-image-tracking-tools/traccuracy#358),
 # so divisualisation can depend on a RELEASED traccuracy instead of the PR branch.
@@ -133,7 +134,13 @@ def _labels_by_matching(
 
     seg_ids = np.zeros(len(data), dtype=int)
     times = data[:, 1].astype(np.intp)
-    for t in np.unique(times):
+    unique_times = np.unique(times)
+    for t in tqdm(
+        unique_times,
+        total=len(unique_times),
+        desc="Matching detections to masks",
+        leave=False,
+    ):
         rows = np.nonzero(times == t)[0]
         frame = segmentation[int(t)]
         labels, coms = _mask_centroids(frame)  # labels (M,), coms (M, ndim)

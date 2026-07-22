@@ -35,6 +35,7 @@ dependencies = [
     "numpy",
     "networkx",
     "scipy",  # used by the vendored napari loader (_napari_loader.py)
+    "tqdm",  # progress bars (utils loaders + vendored napari loader)
     # load_napari_data (traccuracy PR #358) isn't in a traccuracy release yet, so
     # it's vendored here (see divisualisation._napari_loader) and we depend on a
     # released traccuracy instead of the PR git branch (PyPI rejects git deps).
