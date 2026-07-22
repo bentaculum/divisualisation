@@ -276,6 +276,10 @@ class SpacetimeWidget(Container):
         # role mapping (those get error-view colors); every other tracks layer
         # (incl. hidden, non-role ones) is lifted too, keeping its own coloring.
         engine.apply(target, extra_layers=self._all_tracks_target())
+        # After apply, sync the layer-controls "graph" checkbox to our
+        # display_graph change and force a redraw so re-augmented layers render at
+        # their folded (lifted) positions rather than the flat z=0 plane.
+        self._finalize_division_edges()
         # In the Divisualisation view, keep only the selected layers visible.
         # Re-run on every apply so changing a dropdown updates what's hidden.
         if engine is self._lift_errors_engine:
@@ -499,6 +503,22 @@ class SpacetimeWidget(Container):
                 "Color division edges: the selected tracks layer(s) have no "
                 "divisions (empty graph)."
             )
+
+    def _finalize_division_edges(self):
+        """Post-apply fixups for augmented layers.
+
+        Run AFTER ``engine.apply``. We mutate ``display_graph``/``data``/``graph``
+        programmatically inside the engine's blocked-events context, so (a) the
+        layer-controls "graph" checkbox is left stale and (b) the vispy node can
+        keep the pre-fold (flat, z=0) positions on a re-apply. Emitting
+        ``display_graph`` re-syncs the control; ``refresh()`` forces a redraw at
+        the folded positions.
+        """
+        for layer in self._suppressed_graphs:
+            if layer not in self._viewer.layers:
+                continue
+            layer.events.display_graph()
+            layer.refresh()
 
     @staticmethod
     def _set_tracks_data(layer, data, graph, prior):
