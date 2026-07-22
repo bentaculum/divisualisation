@@ -607,6 +607,34 @@ def test_division_edges_checkbox_preserves_visibility(make_napari_viewer):
     assert viewer.layers["GT tracks"].visible is True
 
 
+def test_division_edges_hidden_layer_folds_when_shown(make_napari_viewer):
+    # Augmenting a HIDDEN layer must still leave it correctly lifted: when later
+    # shown it should render folded (5-col data, z<0, 4D extent), not flat at z=0.
+    import numpy as np
+
+    from divisualisation._widget import SpacetimeWidget
+
+    viewer = make_napari_viewer()
+    viewer.add_image(np.zeros((4, 20, 20)), name="raw")
+    _add_dividing_gt(viewer, name="GT tracks")
+    _add_dividing_gt(viewer, name="predicted tracks")
+
+    w = SpacetimeWidget(viewer)
+    w._role_combos["gt"].value = "GT tracks"
+    w._role_combos["pred"].value = "predicted tracks"
+    w._lift_errors.value = True  # pred hidden by default
+    # Check the box while pred is hidden, so its augmentation happens hidden.
+    w._division_edges.value = True
+    pred = viewer.layers["predicted tracks"]
+    assert pred.visible is False
+
+    pred.visible = True
+    data = np.asarray(pred.data)
+    assert data.shape[1] == 5  # lifted
+    assert data[:, 2].min() < 0  # folded into z, not flat at 0
+    assert pred.extent.data.shape[1] == 4  # 4D extent (not a stale 3D one)
+
+
 def test_division_edges_keep_layer_coloring(make_napari_viewer):
     import numpy as np
 

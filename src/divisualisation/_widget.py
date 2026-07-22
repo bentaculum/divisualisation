@@ -560,7 +560,14 @@ class SpacetimeWidget(Container):
         prior_props = prior["properties"]
         prior_color_by = prior["color_by"]
         layer.color_by = "track_id"  # always-present; avoids a transient warning
+        # napari skips updating a HIDDEN layer's ndim/extent when its data
+        # changes, so augmenting/restoring a hidden layer leaves a stale extent
+        # and it renders unlifted (flat) once shown. Set the data while
+        # momentarily visible so the extent updates, then restore visibility.
+        was_visible = layer.visible
+        layer.visible = True
         layer.data = data
+        layer.visible = was_visible
         layer.graph = graph
         n = len(layer.data)
         rebuilt = {}
