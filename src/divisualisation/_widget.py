@@ -97,10 +97,10 @@ class SpacetimeWidget(Container):
         # Two mutually exclusive toggles, each shown in its own box below. The
         # lift amount is one shared value but has a slider in each box; the two
         # sliders mirror each other. ``_lift_amount`` (errors box) is canonical.
-        # Both toggles read "Lifted view" -- which workflow each drives is given
+        # Both toggles read "Lift tracks" -- which workflow each drives is given
         # by its enclosing box title ("Lift all tracks layers" / "Divisualisation").
-        self._lift_all = ToggleSwitch(value=False, label="Lifted view")
-        self._lift_errors = ToggleSwitch(value=False, label="Lifted view")
+        self._lift_all = ToggleSwitch(value=False, label="Lift tracks")
+        self._lift_errors = ToggleSwitch(value=False, label="Lift tracks")
         self._lift_amount = FloatSlider(value=12, min=1, max=50, label="Lift scale")
         self._lift_amount_all = FloatSlider(value=12, min=1, max=50, label="Lift scale")
 
