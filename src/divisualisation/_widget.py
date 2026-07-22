@@ -535,12 +535,17 @@ class SpacetimeWidget(Container):
     def _finalize_division_edges(self):
         """Post-apply fixups for augmented layers.
 
-        Run AFTER ``engine.apply``. We mutate ``display_graph``/``data``/``graph``
-        programmatically inside the engine's blocked-events context, so (a) the
-        layer-controls "graph" checkbox is left stale and (b) the vispy node can
-        keep the pre-fold (flat, z=0) positions on a re-apply. Emitting
-        ``display_graph`` re-syncs the control; ``refresh()`` forces a redraw at
-        the folded positions.
+        Run AFTER ``engine.apply``, where we mutated ``display_graph`` / ``data``
+        / ``graph`` inside the engine's blocked-events context. Re-emit
+        ``display_graph`` so the vispy layer hides the native white graph edges
+        (its ``_on_appearance_change`` listens to that event), and ``refresh()``
+        forces a redraw at the folded positions rather than the flat z=0 plane.
+
+        Note: this does NOT update the layer-controls "graph" checkbox, which
+        stays visually stale -- napari's QtGraphCheckBoxControl only binds
+        checkbox->layer, not layer->checkbox (see its own source comment), so a
+        programmatic display_graph change can't drive the widget. Cosmetic only;
+        the edges render correctly.
         """
         for layer in self._suppressed_graphs:
             if layer not in self._viewer.layers:
