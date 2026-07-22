@@ -27,6 +27,7 @@ toggle-off / uncheck.
 Additive: the functional API works without it.
 """
 
+import logging
 from contextlib import contextmanager
 
 import napari
@@ -38,6 +39,8 @@ from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
 from superqt import QToggleSwitch
 
 from .lift import ROLES, SpacetimeLift, _is_tracks
+
+logger = logging.getLogger(__name__)
 
 
 class _ToggleSwitchBackend(QBaseValueWidget):
@@ -171,6 +174,11 @@ class SpacetimeWidget(Container):
             self._revert_lift()
 
     def _on_toggle_errors(self, *_):
+        logger.info(
+            "[divedges] Divisualisation toggled -> %s (color-edges checkbox=%s)",
+            self._lift_errors.value,
+            self._division_edges.value,
+        )
         if self._lift_errors.value:
             if self._lift_all.value:  # enforce mutual exclusivity
                 self._lift_all.value = False
@@ -188,7 +196,13 @@ class SpacetimeWidget(Container):
         # Only meaningful in an active Divisualisation view. Re-run the standard
         # apply transaction so edges are (re)built or torn down with the correct
         # revert -> build-from-flat -> apply ordering.
-        if self._lift_errors.value and self._lift_errors_engine.applied:
+        active = self._lift_errors.value and self._lift_errors_engine.applied
+        logger.info(
+            "[divedges] checkbox changed -> %s (divisualisation active=%s)",
+            self._division_edges.value,
+            active,
+        )
+        if active:
             self._apply_lift(self._lift_errors_engine, self._roles_target())
 
     def _selected_layer_names(self):
@@ -400,10 +414,41 @@ class SpacetimeWidget(Container):
         back by ``_teardown_division_edges``.
         """
         self._teardown_division_edges()
+        logger.info(
+            "[divedges] rebuild: checkbox=%s errors_toggle=%s engine_applied=%s",
+            self._division_edges.value,
+            self._lift_errors.value,
+            self._lift_errors_engine.applied,
+        )
         if not self._division_edges.value:
+            logger.info("[divedges] checkbox off -> nothing to do")
             return
-        for _role, layer in self._selected_role_layers():
+        selected = list(self._selected_role_layers())
+        logger.info(
+            "[divedges] role values=%s -> selected layers=%s",
+            {r: c.value for r, c in self._role_combos.items()},
+            [layer.name for _r, layer in selected],
+        )
+        if not selected:
+            # The feature only acts on layers picked in the role dropdowns; with
+            # none selected it would silently do nothing. Say so.
+            logger.warning("[divedges] no role layer selected -> nothing drawn")
+            napari.utils.notifications.show_warning(
+                "Color division edges: no role layer selected -- pick a tracks "
+                "layer in the GT (or FN/FP) dropdown."
+            )
+            return
+        augmented_any = False
+        for _role, layer in selected:
             rows = self._division_connection_rows(layer)
+            logger.info(
+                "[divedges] %r (role=%s): graph_size=%d, ndata=%d, connection_rows=%s",
+                layer.name,
+                _role,
+                len(dict(layer.graph)),
+                len(layer.data),
+                None if rows is None else len(rows),
+            )
             if rows is None:
                 continue
             # Stash originals to restore on teardown. The engine snapshots data
@@ -425,6 +470,21 @@ class SpacetimeWidget(Container):
             )
             # Divisions are in the colored tail now; hide the native white edges.
             layer.display_graph = False
+            augmented_any = True
+            logger.info(
+                "[divedges] %r augmented -> ndata=%d, display_graph=%s, color_by=%s",
+                layer.name,
+                len(layer.data),
+                layer.display_graph,
+                layer.color_by,
+            )
+        if not augmented_any:
+            # Roles are selected but none has a division graph to draw.
+            logger.warning("[divedges] selected layers had no divisions to draw")
+            napari.utils.notifications.show_warning(
+                "Color division edges: the selected tracks layer(s) have no "
+                "divisions (empty graph)."
+            )
 
     @staticmethod
     def _set_tracks_data(layer, data, graph, prior):
@@ -462,6 +522,12 @@ class SpacetimeWidget(Container):
         authoritative restore path: the engine snapshots data AFTER our edit, so
         its own revert would otherwise keep the augmented data.
         """
+        if self._suppressed_graphs:
+            logger.info(
+                "[divedges] teardown: restoring %d layer(s): %s",
+                len(self._suppressed_graphs),
+                [layer.name for layer in self._suppressed_graphs],
+            )
         for layer, prior in list(self._suppressed_graphs.items()):
             if layer in self._viewer.layers:
                 self._set_tracks_data(layer, prior["data"], prior["graph"], prior)
