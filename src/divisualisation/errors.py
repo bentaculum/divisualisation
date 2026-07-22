@@ -278,13 +278,16 @@ def compute_edge_errors_from_layers(
     from ._napari_loader import load_napari_data
 
     def to_graph(tracks, labels, name):
-        # Implicit matching: pass the segmentation and let load_napari_data read
-        # each detection's label from the pixel under its position.
+        # Implicit matching: load_napari_data assigns each detection a mask per
+        # frame by bipartite matching. Route its progress bar through napari's
+        # activity dock (progbar_class=napari.utils.progress) so the matching
+        # shows up in the GUI, not just the terminal.
         return load_napari_data(
             np.asarray(tracks.data),
             graph=tracks.graph,
             segmentation=np.asarray(labels.data),
             name=name,
+            progbar_class=napari.utils.progress,
         )
 
     gt_graph = to_graph(gt_tracks, gt_labels, "gt")

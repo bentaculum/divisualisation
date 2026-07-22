@@ -767,6 +767,15 @@ class SpacetimeWidget(Container):
 
     # --- compute errors -----------------------------------------------------
 
+    def _show_activity_dock(self, state=True):
+        # Toggle napari's activity dock so progress bars are visible. Best-effort:
+        # the status bar / dock API is private and only present on a real GUI
+        # viewer, so guard it (a headless ViewerModel or API change is a no-op).
+        try:
+            self._viewer.window._status_bar._toggle_activity_dock(state)
+        except (AttributeError, RuntimeError):
+            pass
+
     def _on_compute(self, *_):
         from traccuracy import EdgeFlag
 
@@ -803,13 +812,19 @@ class SpacetimeWidget(Container):
         # trailing _apply_lift re-augments them.
         self._teardown_division_edges()
 
-        error_layers = compute_edge_errors_from_layers(
-            self._viewer,
-            layers[gt_tracks],
-            layers[gt_labels],
-            layers[pred_tracks],
-            layers[pred_labels],
-        )
+        # Show napari's activity dock so the loader's mask-matching progress bar
+        # (routed through napari.utils.progress) is visible during the compute.
+        self._show_activity_dock(True)
+        try:
+            error_layers = compute_edge_errors_from_layers(
+                self._viewer,
+                layers[gt_tracks],
+                layers[gt_labels],
+                layers[pred_tracks],
+                layers[pred_labels],
+            )
+        finally:
+            self._show_activity_dock(False)
         # Make sure the new error layers are present as options, then point the
         # FN/FP roles at them. Suspend role events so re-deriving choices and
         # setting these values don't each trigger a re-lift.
