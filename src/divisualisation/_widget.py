@@ -36,6 +36,7 @@ from magicgui.backends._qtpy.widgets import QBaseValueWidget
 from magicgui.widgets import CheckBox, ComboBox, Container, FloatSlider, PushButton
 from magicgui.widgets.bases import ValueWidget
 from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
+from qtpy.QtWidgets import QGroupBox, QVBoxLayout  # type: ignore[attr-defined]
 from superqt import QToggleSwitch
 
 from .lift import ROLES, SpacetimeLift, _is_labels, _is_tracks
@@ -93,10 +94,13 @@ class SpacetimeWidget(Container):
         # Points at the engine for the currently active toggle.
         self._lift = self._lift_all_engine
 
-        # Two mutually exclusive toggles + one shared lift slider.
+        # Two mutually exclusive toggles, each shown in its own box below. The
+        # lift amount is one shared value but has a slider in each box; the two
+        # sliders mirror each other. ``_lift_amount`` (errors box) is canonical.
         self._lift_all = ToggleSwitch(value=False, label="Lift all tracks layers")
         self._lift_errors = ToggleSwitch(value=False, label="Divisualisation")
         self._lift_amount = FloatSlider(value=12, min=0, max=99, label="lift")
+        self._lift_amount_all = FloatSlider(value=12, min=0, max=99, label="lift")
 
         # Error-view controls. Choices are CALLABLES (not static lists): napari's
         # add_dock_widget auto-connects layer inserted/removed/reordered/renamed
@@ -115,10 +119,20 @@ class SpacetimeWidget(Container):
         # module docstring). Only acts in the Divisualisation workflow.
         self._division_edges = CheckBox(value=False, label="Color division edges")
         self._compute_btn = PushButton(text="Compute errors")
-        self._error_controls = [
-            *self._role_combos.values(),
+        # The 6 role/labels dropdowns, ordered GT / pred tracks, GT / pred labels,
+        # then FN / FP edges last. _error_controls keeps every control that is
+        # only meaningful in the Divisualisation workflow (used by
+        # _show_error_controls).
+        self._role_labels_order = [
+            self._role_combos["gt"],
+            self._role_combos["pred"],
             self._gt_labels,
             self._pred_labels,
+            self._role_combos["fn_edges"],
+            self._role_combos["fp_edges"],
+        ]
+        self._error_controls = [
+            *self._role_labels_order,
             self._division_edges,
             self._compute_btn,
         ]
@@ -134,7 +148,12 @@ class SpacetimeWidget(Container):
 
         self._lift_all.changed.connect(self._on_toggle_all)
         self._lift_errors.changed.connect(self._on_toggle_errors)
-        self._lift_amount.changed.connect(self._on_lift_amount)
+        self._lift_amount.changed.connect(
+            lambda *_: self._on_lift_amount(self._lift_amount)
+        )
+        self._lift_amount_all.changed.connect(
+            lambda *_: self._on_lift_amount(self._lift_amount_all)
+        )
         self._division_edges.changed.connect(self._on_division_edges_changed)
         self._compute_btn.changed.connect(self._on_compute)
         for role, combo in self._role_combos.items():
@@ -142,12 +161,27 @@ class SpacetimeWidget(Container):
         for combo in (self._gt_labels, self._pred_labels):
             combo.changed.connect(lambda *_: self._on_role_changed(None))
 
-        self.extend([
-            self._lift_all,
-            self._lift_errors,
-            self._lift_amount,
-            *self._error_controls,
-        ])
+        # Lay the controls out as two titled boxes: "Lift all tracks layers" and
+        # "Divisualisation", each with its own (synced) lift slider. Each group
+        # is a magicgui Container wrapped in a QGroupBox added to our native
+        # layout; the widgets keep working as normal magicgui widgets.
+        self._lift_all_box = Container(
+            widgets=[self._lift_all, self._lift_amount_all], labels=True
+        )
+        self._divis_box = Container(
+            widgets=[self._lift_errors, self._lift_amount, *self._error_controls],
+            labels=True,
+        )
+        for title, box in (
+            ("Lift all tracks layers", self._lift_all_box),
+            ("Divisualisation", self._divis_box),
+        ):
+            group = QGroupBox(title)
+            layout = QVBoxLayout()
+            layout.setContentsMargins(4, 4, 4, 4)
+            layout.addWidget(box.native)
+            group.setLayout(layout)
+            self.native.layout().addWidget(group)
 
         # napari's add_dock_widget keeps the choice LISTS in sync (via the
         # auto-connected reset_choices). We only need to fire the one-time
@@ -318,9 +352,19 @@ class SpacetimeWidget(Container):
             if e.applied:
                 e.revert()
 
-    def _on_lift_amount(self, *_):
+    def _on_lift_amount(self, source):
+        # The two boxes each have a lift slider for one shared value; mirror the
+        # one the user moved onto the other (signals blocked to avoid a loop),
+        # then push the value to both engines.
+        value = source.value
+        other = (
+            self._lift_amount_all if source is self._lift_amount else self._lift_amount
+        )
+        if other.value != value:
+            with other.changed.blocked():
+                other.value = value
         for e in (self._lift_all_engine, self._lift_errors_engine):
-            e.time_scale = self._lift_amount.value
+            e.time_scale = value
 
     @contextmanager
     def _suspend_role_events(self):
