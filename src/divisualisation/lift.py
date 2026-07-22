@@ -237,6 +237,11 @@ class SpacetimeLift:
         # Capture the current timepoint BEFORE mutating: lifting layer data
         # resets it, and we want the slider to stay put across the toggle.
         current_time = self._viewer.dims.current_step[0]
+        # Also capture the FULL pre-lift step so revert can restore every axis
+        # the flat view had -- notably the z slider for genuine 3D+t data, which
+        # exists flat and should survive the round trip (time alone is restored
+        # while lifted, since z is folded/invented there).
+        pre_lift_step = tuple(self._viewer.dims.current_step)
 
         for layer in self._viewer.layers:
             self._snapshots[layer] = self._snapshot_layer(layer)
@@ -262,6 +267,7 @@ class SpacetimeLift:
             "ndisplay": self._viewer.dims.ndisplay,
             "camera": self._camera_state(),
             "current_time": current_time,
+            "pre_lift_step": pre_lift_step,
         }
         self._viewer.dims.ndisplay = 3
         self._viewer.dims.events.point.connect(self._update_sweep)
@@ -329,6 +335,14 @@ class SpacetimeLift:
 
         self._viewer.dims.ndisplay = self._viewer_snapshot["ndisplay"]
         self._set_camera_state(self._viewer_snapshot["camera"])
+        # Restore the pre-lift slider position on every axis that still exists
+        # after the layers are restored (e.g. z for 3D+t data), then keep the
+        # time axis where the user left it during the lift.
+        pre_lift_step = self._viewer_snapshot.get("pre_lift_step", ())
+        ndim = self._viewer.dims.ndim
+        for axis, step in enumerate(pre_lift_step):
+            if axis < ndim:
+                self._viewer.dims.set_current_step(axis, step)
         self._viewer.dims.set_current_step(0, current_time)
         self._applied = False
         self._snapshots.clear()

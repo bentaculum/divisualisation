@@ -73,6 +73,27 @@ def test_revert_restores_exact_state(viewer_with_layers):
     assert not lift.applied
 
 
+def test_revert_restores_z_slider_for_3d_data():
+    # For genuine 3D+t data the flat view has a z slider; its position must
+    # survive lift -> revert (regression: only the time axis was restored).
+    v = ViewerModel()
+    v.add_image(np.zeros((6, 5, 16, 16), np.uint8), name="raw", scale=(1, 10, 1, 1))
+    v.add_tracks(
+        np.array([[1, t, 2, 8, 8] for t in range(6)], float),
+        name="tracks",
+        scale=(1, 10, 1, 1),
+    )
+    v.dims.set_current_step(1, 3)  # z slider
+    v.dims.set_current_step(0, 2)  # time slider
+    lift = SpacetimeLift(v, time_scale=12)
+    lift.apply(["tracks"])
+    # scrub time while lifted; that should be kept, z should return to pre-lift.
+    v.dims.set_current_step(0, 5)
+    lift.revert()
+    assert v.dims.current_step[0] == 5  # time: where the user left it
+    assert v.dims.current_step[1] == 3  # z: restored to pre-lift
+
+
 def test_round_trip_is_stable(viewer_with_layers):
     v = viewer_with_layers
     orig = v.layers["tracks"].data.copy()
