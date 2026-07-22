@@ -516,6 +516,40 @@ def test_division_edges_build_and_teardown(make_napari_viewer):
     assert gt.data.shape[1] == 4
 
 
+def test_division_edges_augment_gt_and_pred(make_napari_viewer):
+    import numpy as np
+
+    from divisualisation._widget import SpacetimeWidget
+
+    viewer = make_napari_viewer()
+    viewer.add_image(np.zeros((4, 20, 20)), name="raw")
+    _add_dividing_gt(viewer, name="GT tracks")
+    _add_dividing_gt(viewer, name="predicted tracks")
+    n_gt = len(viewer.layers["GT tracks"].data)
+    n_pred = len(viewer.layers["predicted tracks"].data)
+
+    w = SpacetimeWidget(viewer)
+    w._role_combos["gt"].value = "GT tracks"
+    w._role_combos["pred"].value = "predicted tracks"
+    w._division_edges.value = True
+    w._lift_errors.value = True
+
+    # Both GT and predicted role layers get their division edges colored in place
+    # (predicted too, even though the view hides it by default).
+    gt = viewer.layers["GT tracks"]
+    pred = viewer.layers["predicted tracks"]
+    assert len(gt.data) == n_gt + _n_division_rows(viewer)
+    assert gt.display_graph is False
+    assert len(pred.data) == n_pred + _n_division_rows(viewer)
+    assert pred.display_graph is False
+
+    # Toggle off restores both.
+    w._lift_errors.value = False
+    assert len(viewer.layers["GT tracks"].data) == n_gt
+    assert len(viewer.layers["predicted tracks"].data) == n_pred
+    assert viewer.layers["predicted tracks"].display_graph is True
+
+
 def test_division_edges_checkbox_live_toggle(make_napari_viewer):
     import numpy as np
 

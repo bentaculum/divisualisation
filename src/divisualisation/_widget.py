@@ -350,14 +350,12 @@ class SpacetimeWidget(Container):
     def _selected_role_layers(self):
         """(role, layer) for each role dropdown pointing at a real tracks layer.
 
-        Skips ``pred``: predicted tracks are hidden in the Divisualisation view
-        (their errors show via the FN/FP overlays), so drawing their division
-        edges would just add hidden clutter.
+        Includes ``pred``: the predicted-tracks layer is hidden by default in the
+        Divisualisation view, but its division edges are still colored in place so
+        they show as soon as it's made visible.
         """
         layer_names = [ly.name for ly in self._viewer.layers]
         for role, combo in self._role_combos.items():
-            if role == "pred":
-                continue
             name = combo.value
             if not name or name == _NONE_CHOICE:
                 continue
