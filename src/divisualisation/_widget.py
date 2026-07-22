@@ -60,7 +60,7 @@ class ToggleSwitch(ValueWidget):
 # which track layer fills the role from its name.
 _ROLE_LABELS = {
     "gt": "GT tracks",
-    "pred": "predicted tracks",
+    "pred": "Predicted tracks",
     "fn_edges": "FN edges",
     "fp_edges": "FP edges",
 }
@@ -116,7 +116,9 @@ class SpacetimeWidget(Container):
             for role in ROLES
         }
         self._gt_labels = ComboBox(label="GT labels", choices=self._label_choices)
-        self._pred_labels = ComboBox(label="pred labels", choices=self._label_choices)
+        self._pred_labels = ComboBox(
+            label="Predicted labels", choices=self._label_choices
+        )
         # Under the 6 role/labels dropdowns: opt-in colored division edges (see
         # module docstring). Only acts in the Divisualisation workflow.
         self._division_edges = CheckBox(value=False, label="Color division edges")
@@ -779,9 +781,9 @@ class SpacetimeWidget(Container):
             label
             for label, value in (
                 ("GT tracks", gt_tracks),
-                ("predicted tracks", pred_tracks),
+                ("Predicted tracks", pred_tracks),
                 ("GT labels", gt_labels),
-                ("pred labels", pred_labels),
+                ("Predicted labels", pred_labels),
             )
             if not value or value == _NONE_CHOICE
         ]
