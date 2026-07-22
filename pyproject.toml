@@ -14,6 +14,8 @@ requires-python = ">=3.10"
 dynamic = ["version"]
 classifiers = [
     "Development Status :: 3 - Alpha",
+    # Required for the napari hub to list this plugin (the hub crawls PyPI for it).
+    "Framework :: napari",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering",
     "License :: OSI Approved :: MIT License",
@@ -35,8 +37,16 @@ dependencies = [
     # load_napari_data is not yet in a traccuracy release; pin to the open PR
     # branch that adds it (live-image-tracking-tools/traccuracy#358). Switch back
     # to a versioned release ("traccuracy>=<ver>") once that PR is merged and cut.
+    # NOTE: PyPI rejects direct git/URL dependencies, so this MUST become a
+    # versioned release before the deploy workflow can publish to PyPI.
     "traccuracy @ git+https://github.com/live-image-tracking-tools/traccuracy.git@feature/from-napari-loader",
 ]
+
+[project.urls]
+"Homepage" = "https://github.com/bentaculum/divisualisation"
+"Source Code" = "https://github.com/bentaculum/divisualisation"
+"Bug Tracker" = "https://github.com/bentaculum/divisualisation/issues"
+"User Support" = "https://github.com/bentaculum/divisualisation/issues"
 
 [project.entry-points."napari.manifest"]
 divisualisation = "divisualisation:napari.yaml"
