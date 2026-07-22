@@ -233,8 +233,9 @@ def test_compute_during_lift_reapplies_and_keeps_dropdowns(
 
 
 def test_compute_with_division_edges_sees_real_graph(make_napari_viewer, monkeypatch):
-    # Regression: with colored division edges on, computing errors must run on
-    # the GT layer's REAL graph, not the zeroed one we swap in for the overlay.
+    # Regression: with colored division edges on, the GT layer is augmented in
+    # place (its graph moves into the tail). Computing errors must see the layer
+    # restored to its ORIGINAL graph + data, not the augmented state.
     import numpy as np
     from traccuracy import EdgeFlag
 
@@ -247,11 +248,13 @@ def test_compute_with_division_edges_sees_real_graph(make_napari_viewer, monkeyp
     _add_dividing_gt(viewer, name="predicted tracks")
     viewer.add_labels(np.zeros((4, 20, 20), int), name="gt masks")
     viewer.add_labels(np.zeros((4, 20, 20), int), name="pred masks")
+    n0 = len(viewer.layers["GT tracks"].data)
 
     seen = {}
 
     def fake_compute(v, gt_t, gt_l, pred_t, pred_l, **kw):
         seen["gt_graph"] = dict(gt_t.graph)  # graph visible at compute time
+        seen["gt_rows"] = len(gt_t.data)  # data visible at compute time
         out = {}
         for flag in (EdgeFlag.CTC_FALSE_NEG, EdgeFlag.CTC_FALSE_POS):
             out[flag] = v.add_tracks(
@@ -264,15 +267,13 @@ def test_compute_with_division_edges_sees_real_graph(make_napari_viewer, monkeyp
     w = SpacetimeWidget(viewer)
     w._division_edges.value = True
     w._lift_errors.value = True
-    # The graph is kept intact (only display_graph is toggled), so it's always
-    # available for reads -- the point is Compute must see the real divisions.
-    assert dict(viewer.layers["GT tracks"].graph)
     assert viewer.layers["GT tracks"].display_graph is False  # native edges off
 
     w._on_compute()
     assert seen["gt_graph"]  # compute saw the real division graph
-    # Edges are rebuilt after compute and the native edges stay off.
-    assert any(ly.name.endswith("division edges") for ly in viewer.layers)
+    assert seen["gt_rows"] == n0  # and the un-augmented data
+    # After compute the layer is re-augmented and native edges stay off.
+    assert viewer.layers["GT tracks"].display_graph is False
 
 
 def test_camera_shared_display_per_view(make_napari_viewer):
@@ -458,8 +459,10 @@ def _add_dividing_gt(viewer, name="GT tracks"):
     return viewer.add_tracks(tracks, graph=tracks_graph, name=name, tail_length=5)
 
 
-def _edge_layers(viewer):
-    return [ly for ly in viewer.layers if ly.name.endswith("division edges")]
+def _n_division_rows(viewer, name="GT tracks"):
+    # The dividing GT graph has two divisions (1->2, 1->3), so augmentation adds
+    # exactly two vertices to the layer's data.
+    return 2
 
 
 def test_division_edges_off_by_default(make_napari_viewer):
@@ -470,12 +473,13 @@ def test_division_edges_off_by_default(make_napari_viewer):
     viewer = make_napari_viewer()
     viewer.add_image(np.zeros((4, 20, 20)), name="raw")
     _add_dividing_gt(viewer)
+    n0 = len(viewer.layers["GT tracks"].data)
 
     w = SpacetimeWidget(viewer)
     assert w._division_edges.value is False
-    # Toggling Divisualisation without checking the box adds no edge layers.
+    # Toggling Divisualisation without checking the box leaves the layer alone.
     w._lift_errors.value = True
-    assert _edge_layers(viewer) == []
+    assert len(viewer.layers["GT tracks"].data) == n0  # no vertices added
     # The GT layer still shows its own (white) graph edges -- not turned off.
     assert viewer.layers["GT tracks"].display_graph is True
 
@@ -488,28 +492,28 @@ def test_division_edges_build_and_teardown(make_napari_viewer):
     viewer = make_napari_viewer()
     viewer.add_image(np.zeros((4, 20, 20)), name="raw")
     _add_dividing_gt(viewer)
+    n0 = len(viewer.layers["GT tracks"].data)
 
     w = SpacetimeWidget(viewer)
     w._division_edges.value = True
     w._lift_errors.value = True
 
-    # One colored edge layer for the GT role; it is lifted (5 columns) with the
-    # rest, and the source layer's native white graph edges are turned off while
-    # it stands in (the graph itself is kept intact).
-    edges = _edge_layers(viewer)
-    assert len(edges) == 1
-    edge_layer = edges[0]
-    assert edge_layer.data.shape[1] == 5  # lifted alongside everything else
-    assert edge_layer.color_by == "_div"
+    # The GT layer is edited IN PLACE (no separate overlay): a vertex per
+    # division is appended so the divisions draw as its own tail, its native
+    # white graph edges are turned off, and it lifts (5 cols) with everything.
     gt = viewer.layers["GT tracks"]
+    assert not any(ly.name.endswith("division edges") for ly in viewer.layers)
+    assert len(gt.data) == n0 + _n_division_rows(viewer)
+    assert gt.data.shape[1] == 5  # lifted
     assert gt.display_graph is False  # native edges hidden
-    assert dict(gt.graph)  # graph kept intact
 
-    # Toggle Divisualisation off: edge layer gone, native edges back, flat again.
+    # Toggle Divisualisation off: data + native edges restored, flat again.
     w._lift_errors.value = False
-    assert _edge_layers(viewer) == []
-    assert viewer.layers["GT tracks"].display_graph is True  # restored
-    assert viewer.layers["GT tracks"].data.shape[1] == 4
+    gt = viewer.layers["GT tracks"]
+    assert len(gt.data) == n0
+    assert gt.display_graph is True  # restored
+    assert dict(gt.graph)  # graph restored
+    assert gt.data.shape[1] == 4
 
 
 def test_division_edges_checkbox_live_toggle(make_napari_viewer):
@@ -520,24 +524,26 @@ def test_division_edges_checkbox_live_toggle(make_napari_viewer):
     viewer = make_napari_viewer()
     viewer.add_image(np.zeros((4, 20, 20)), name="raw")
     _add_dividing_gt(viewer)
+    n0 = len(viewer.layers["GT tracks"].data)
 
     w = SpacetimeWidget(viewer)
     w._lift_errors.value = True
-    assert _edge_layers(viewer) == []  # box off
+    assert len(viewer.layers["GT tracks"].data) == n0  # box off, untouched
 
-    # Checking the box while Divisualisation is active builds the edges live...
+    # Checking the box while Divisualisation is active augments the layer live...
     w._division_edges.value = True
-    assert len(_edge_layers(viewer)) == 1
+    assert len(viewer.layers["GT tracks"].data) == n0 + _n_division_rows(viewer)
     assert viewer.layers["GT tracks"].display_graph is False
 
-    # ...and unchecking removes them and shows native edges again, still lifted.
+    # ...and unchecking restores the data + native edges, still lifted.
     w._division_edges.value = False
-    assert _edge_layers(viewer) == []
-    assert viewer.layers["GT tracks"].display_graph is True
-    assert viewer.layers["GT tracks"].data.shape[1] == 5  # still lifted
+    gt = viewer.layers["GT tracks"]
+    assert len(gt.data) == n0
+    assert gt.display_graph is True
+    assert gt.data.shape[1] == 5  # still lifted
 
 
-def test_division_edges_not_in_dropdowns(make_napari_viewer):
+def test_division_edges_keep_layer_coloring(make_napari_viewer):
     import numpy as np
 
     from divisualisation._widget import SpacetimeWidget
@@ -550,8 +556,8 @@ def test_division_edges_not_in_dropdowns(make_napari_viewer):
     w._division_edges.value = True
     w._lift_errors.value = True
 
-    # The widget-owned edge overlay must never appear as a selectable role.
-    assert len(_edge_layers(viewer)) == 1
-    assert not any(name.endswith("division edges") for name in w._track_layer_names())
-    # It also stays visible (not swept into the hidden set) under the errors view.
-    assert _edge_layers(viewer)[0].visible
+    # The appended division vertices are colored like the rest of the GT layer:
+    # the color property spans every row, so no vertex is left uncolored.
+    gt = viewer.layers["GT tracks"]
+    assert len(gt.properties[gt.color_by]) == len(gt.data)
+    assert gt.track_colors is not None and len(gt.track_colors) == len(gt.data)
