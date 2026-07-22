@@ -232,6 +232,50 @@ def test_compute_during_lift_reapplies_and_keeps_dropdowns(
     assert w._role_combos["gt"].enabled
 
 
+def test_compute_with_division_edges_sees_real_graph(make_napari_viewer, monkeypatch):
+    # Regression: with colored division edges on, the GT layer is augmented in
+    # place (its graph moves into the tail). Computing errors must see the layer
+    # restored to its ORIGINAL graph + data, not the augmented state.
+    import numpy as np
+    from traccuracy import EdgeFlag
+
+    import divisualisation.errors as errors_mod
+    from divisualisation._widget import SpacetimeWidget
+
+    viewer = make_napari_viewer()
+    viewer.add_image(np.zeros((4, 20, 20)), name="raw")
+    _add_dividing_gt(viewer, name="GT tracks")
+    _add_dividing_gt(viewer, name="predicted tracks")
+    viewer.add_labels(np.zeros((4, 20, 20), int), name="gt masks")
+    viewer.add_labels(np.zeros((4, 20, 20), int), name="pred masks")
+    n0 = len(viewer.layers["GT tracks"].data)
+
+    seen = {}
+
+    def fake_compute(v, gt_t, gt_l, pred_t, pred_l, **kw):
+        seen["gt_graph"] = dict(gt_t.graph)  # graph visible at compute time
+        seen["gt_rows"] = len(gt_t.data)  # data visible at compute time
+        out = {}
+        for flag in (EdgeFlag.CTC_FALSE_NEG, EdgeFlag.CTC_FALSE_POS):
+            out[flag] = v.add_tracks(
+                np.array([[1, 0, 2, 3], [1, 1, 2, 3]], float), name=str(flag.value)
+            )
+        return out
+
+    monkeypatch.setattr(errors_mod, "compute_edge_errors_from_layers", fake_compute)
+
+    w = SpacetimeWidget(viewer)
+    w._division_edges.value = True
+    w._lift_errors.value = True
+    assert viewer.layers["GT tracks"].display_graph is False  # native edges off
+
+    w._on_compute()
+    assert seen["gt_graph"]  # compute saw the real division graph
+    assert seen["gt_rows"] == n0  # and the un-augmented data
+    # After compute the layer is re-augmented and native edges stay off.
+    assert viewer.layers["GT tracks"].display_graph is False
+
+
 def test_camera_shared_display_per_view(make_napari_viewer):
     import numpy as np
 
@@ -386,3 +430,226 @@ def test_divisualisation_hides_predicted_by_default(make_napari_viewer):
     w._lift_errors.value = False
     # ...and restored to its prior visibility on toggle-off.
     assert viewer.layers["predicted tracks"].visible
+
+
+def _add_dividing_gt(viewer, name="GT tracks"):
+    """Add a GT tracks layer whose graph has one division (built like the
+    examples, with the shared division node dropped)."""
+    import networkx as nx
+
+    from divisualisation.utils import graph_to_napari_tracks
+
+    g = nx.DiGraph()
+    # 0 (t0) -> 1 (t1) divides into 2 and 3 (t2), each continues to t3.
+    coords = {
+        0: (0, 5.0, 5.0),
+        1: (1, 6.0, 6.0),
+        2: (2, 7.0, 4.0),
+        3: (2, 7.0, 8.0),
+        4: (3, 8.0, 3.0),
+        5: (3, 8.0, 9.0),
+    }
+    for n, (t, y, x) in coords.items():
+        g.add_node(n, t=t, y=y, x=x)
+    for u, v in [(0, 1), (1, 2), (1, 3), (2, 4), (3, 5)]:
+        g.add_edge(u, v)
+    tracks, tracks_graph, _ = graph_to_napari_tracks(
+        g, include_z=False, drop_division_duplicates=True
+    )
+    return viewer.add_tracks(tracks, graph=tracks_graph, name=name, tail_length=5)
+
+
+def _n_division_rows(viewer, name="GT tracks"):
+    # The dividing GT graph has two divisions (1->2, 1->3), so augmentation adds
+    # exactly two vertices to the layer's data.
+    return 2
+
+
+def test_division_edges_off_by_default(make_napari_viewer):
+    import numpy as np
+
+    from divisualisation._widget import SpacetimeWidget
+
+    viewer = make_napari_viewer()
+    viewer.add_image(np.zeros((4, 20, 20)), name="raw")
+    _add_dividing_gt(viewer)
+    n0 = len(viewer.layers["GT tracks"].data)
+
+    w = SpacetimeWidget(viewer)
+    assert w._division_edges.value is False
+    # Toggling Divisualisation without checking the box leaves the layer alone.
+    w._lift_errors.value = True
+    assert len(viewer.layers["GT tracks"].data) == n0  # no vertices added
+    # The GT layer still shows its own (white) graph edges -- not turned off.
+    assert viewer.layers["GT tracks"].display_graph is True
+
+
+def test_division_edges_build_and_teardown(make_napari_viewer):
+    import numpy as np
+
+    from divisualisation._widget import SpacetimeWidget
+
+    viewer = make_napari_viewer()
+    viewer.add_image(np.zeros((4, 20, 20)), name="raw")
+    _add_dividing_gt(viewer)
+    n0 = len(viewer.layers["GT tracks"].data)
+
+    w = SpacetimeWidget(viewer)
+    w._division_edges.value = True
+    w._lift_errors.value = True
+
+    # The GT layer is edited IN PLACE (no separate overlay): a vertex per
+    # division is appended so the divisions draw as its own tail, its native
+    # white graph edges are turned off, and it lifts (5 cols) with everything.
+    gt = viewer.layers["GT tracks"]
+    assert not any(ly.name.endswith("division edges") for ly in viewer.layers)
+    assert len(gt.data) == n0 + _n_division_rows(viewer)
+    assert gt.data.shape[1] == 5  # lifted
+    assert gt.display_graph is False  # native edges hidden
+
+    # Toggle Divisualisation off: data + native edges restored, flat again.
+    w._lift_errors.value = False
+    gt = viewer.layers["GT tracks"]
+    assert len(gt.data) == n0
+    assert gt.display_graph is True  # restored
+    assert dict(gt.graph)  # graph restored
+    assert gt.data.shape[1] == 4
+
+
+def test_division_edges_augment_gt_and_pred(make_napari_viewer):
+    import numpy as np
+
+    from divisualisation._widget import SpacetimeWidget
+
+    viewer = make_napari_viewer()
+    viewer.add_image(np.zeros((4, 20, 20)), name="raw")
+    _add_dividing_gt(viewer, name="GT tracks")
+    _add_dividing_gt(viewer, name="predicted tracks")
+    n_gt = len(viewer.layers["GT tracks"].data)
+    n_pred = len(viewer.layers["predicted tracks"].data)
+
+    w = SpacetimeWidget(viewer)
+    w._role_combos["gt"].value = "GT tracks"
+    w._role_combos["pred"].value = "predicted tracks"
+    w._division_edges.value = True
+    w._lift_errors.value = True
+
+    # Both GT and predicted role layers get their division edges colored in place
+    # (predicted too, even though the view hides it by default).
+    gt = viewer.layers["GT tracks"]
+    pred = viewer.layers["predicted tracks"]
+    assert len(gt.data) == n_gt + _n_division_rows(viewer)
+    assert gt.display_graph is False
+    assert len(pred.data) == n_pred + _n_division_rows(viewer)
+    assert pred.display_graph is False
+
+    # Toggle off restores both.
+    w._lift_errors.value = False
+    assert len(viewer.layers["GT tracks"].data) == n_gt
+    assert len(viewer.layers["predicted tracks"].data) == n_pred
+    assert viewer.layers["predicted tracks"].display_graph is True
+
+
+def test_division_edges_checkbox_live_toggle(make_napari_viewer):
+    import numpy as np
+
+    from divisualisation._widget import SpacetimeWidget
+
+    viewer = make_napari_viewer()
+    viewer.add_image(np.zeros((4, 20, 20)), name="raw")
+    _add_dividing_gt(viewer)
+    n0 = len(viewer.layers["GT tracks"].data)
+
+    w = SpacetimeWidget(viewer)
+    w._lift_errors.value = True
+    assert len(viewer.layers["GT tracks"].data) == n0  # box off, untouched
+
+    # Checking the box while Divisualisation is active augments the layer live...
+    w._division_edges.value = True
+    assert len(viewer.layers["GT tracks"].data) == n0 + _n_division_rows(viewer)
+    assert viewer.layers["GT tracks"].display_graph is False
+
+    # ...and unchecking restores the data + native edges, still lifted.
+    w._division_edges.value = False
+    gt = viewer.layers["GT tracks"]
+    assert len(gt.data) == n0
+    assert gt.display_graph is True
+    assert gt.data.shape[1] == 5  # still lifted
+
+
+def test_division_edges_checkbox_preserves_visibility(make_napari_viewer):
+    # Toggling the color-edges checkbox must NOT change layer visibility (it must
+    # not re-hide the predicted layer the way the Divisualisation toggle does).
+    import numpy as np
+
+    from divisualisation._widget import SpacetimeWidget
+
+    viewer = make_napari_viewer()
+    viewer.add_image(np.zeros((4, 20, 20)), name="raw")
+    _add_dividing_gt(viewer, name="GT tracks")
+    _add_dividing_gt(viewer, name="predicted tracks")
+
+    w = SpacetimeWidget(viewer)
+    w._role_combos["gt"].value = "GT tracks"
+    w._role_combos["pred"].value = "predicted tracks"
+    w._division_edges.value = True
+    w._lift_errors.value = True
+    # Divisualisation hides pred by default; the user then shows it.
+    assert viewer.layers["predicted tracks"].visible is False
+    viewer.layers["predicted tracks"].visible = True
+
+    # Toggling the coloring checkbox leaves visibility exactly as-is.
+    w._division_edges.value = False
+    assert viewer.layers["predicted tracks"].visible is True
+    assert viewer.layers["GT tracks"].visible is True
+    w._division_edges.value = True
+    assert viewer.layers["predicted tracks"].visible is True
+    assert viewer.layers["GT tracks"].visible is True
+
+
+def test_division_edges_hidden_layer_folds_when_shown(make_napari_viewer):
+    # Augmenting a HIDDEN layer must still leave it correctly lifted: when later
+    # shown it should render folded (5-col data, z<0, 4D extent), not flat at z=0.
+    import numpy as np
+
+    from divisualisation._widget import SpacetimeWidget
+
+    viewer = make_napari_viewer()
+    viewer.add_image(np.zeros((4, 20, 20)), name="raw")
+    _add_dividing_gt(viewer, name="GT tracks")
+    _add_dividing_gt(viewer, name="predicted tracks")
+
+    w = SpacetimeWidget(viewer)
+    w._role_combos["gt"].value = "GT tracks"
+    w._role_combos["pred"].value = "predicted tracks"
+    w._lift_errors.value = True  # pred hidden by default
+    # Check the box while pred is hidden, so its augmentation happens hidden.
+    w._division_edges.value = True
+    pred = viewer.layers["predicted tracks"]
+    assert pred.visible is False
+
+    pred.visible = True
+    data = np.asarray(pred.data)
+    assert data.shape[1] == 5  # lifted
+    assert data[:, 2].min() < 0  # folded into z, not flat at 0
+    assert pred.extent.data.shape[1] == 4  # 4D extent (not a stale 3D one)
+
+
+def test_division_edges_keep_layer_coloring(make_napari_viewer):
+    import numpy as np
+
+    from divisualisation._widget import SpacetimeWidget
+
+    viewer = make_napari_viewer()
+    viewer.add_image(np.zeros((4, 20, 20)), name="raw")
+    _add_dividing_gt(viewer)
+
+    w = SpacetimeWidget(viewer)
+    w._division_edges.value = True
+    w._lift_errors.value = True
+
+    # The appended division vertices are colored like the rest of the GT layer:
+    # the color property spans every row, so no vertex is left uncolored.
+    gt = viewer.layers["GT tracks"]
+    assert len(gt.properties[gt.color_by]) == len(gt.data)
+    assert gt.track_colors is not None and len(gt.track_colors) == len(gt.data)

@@ -77,3 +77,44 @@ def test_drop_division_duplicates():
     )
     assert len(dropped) == graph.number_of_nodes()  # 4, one row per detection
     assert len(kept) > len(dropped)  # duplicates present by default
+
+
+def test_division_connection_rows_extend_daughters_to_division():
+    # The in-place augmentation rows need no GUI viewer: a bare Tracks layer
+    # carries the .data + .graph the staticmethod reads. Each row extends a
+    # daughter track back to the division point (daughter id at parent's last
+    # position), so the division draws as the daughter's own colored tail.
+    import numpy as np
+    from napari.layers import Tracks
+
+    from divisualisation._widget import SpacetimeWidget
+
+    graph = _dividing_2d_graph()
+    # Layers are built by the examples with the division node dropped, so each
+    # daughter starts one step after the parent -- the realistic input.
+    tracks, tracks_graph, _ = graph_to_napari_tracks(
+        graph, include_z=False, drop_division_duplicates=True
+    )
+    layer = Tracks(tracks, graph=tracks_graph)
+
+    rows = SpacetimeWidget._division_connection_rows(layer)
+    # Two divisions (1->2, 1->3): one appended vertex each.
+    assert rows.shape == (2, 4)  # [track_id, t, y, x]
+    # Each row carries a DAUGHTER track id at the PARENT's last position (node 1
+    # at t1, y1, x1 -- the division point).
+    assert set(rows[:, 0]) == {2, 3}  # daughter track ids
+    for row in rows:
+        np.testing.assert_allclose(row[1:], [1.0, 1.0, 1.0])  # parent's last vertex
+
+
+def test_division_connection_rows_none_without_divisions():
+    from napari.layers import Tracks
+
+    from divisualisation._widget import SpacetimeWidget
+
+    # A single linear track has an empty graph -> no division connections.
+    tracks, tracks_graph, _ = graph_to_napari_tracks(
+        _linear_2d_graph(), include_z=False
+    )
+    layer = Tracks(tracks, graph=tracks_graph)
+    assert SpacetimeWidget._division_connection_rows(layer) is None

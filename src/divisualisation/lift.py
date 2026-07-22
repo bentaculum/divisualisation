@@ -104,6 +104,10 @@ _NON_DISPLAY_ATTRS = frozenset({
     "axis_labels",
     "projection_mode",
     "display_id",
+    # The widget owns display_graph: it toggles it off to hide a source layer's
+    # native white graph edges when drawing its own colored division edges. The
+    # engine must not snapshot/remember/re-apply it, or it would clobber that.
+    "display_graph",
     "visible",
 })
 
@@ -589,11 +593,14 @@ class SpacetimeLift:
 
 
 def _is_tracks(layer) -> bool:
-    return type(layer).__name__ == "Tracks"
+    # isinstance, NOT type(layer).__name__ == "Tracks": when the widget is docked
+    # as a plugin, napari wraps layers in a PublicOnlyProxy whose class name is
+    # "PublicOnlyProxy", but isinstance still sees the wrapped Tracks type.
+    return isinstance(layer, napari.layers.Tracks)
 
 
 def _is_labels(layer) -> bool:
-    return type(layer).__name__ == "Labels"
+    return isinstance(layer, napari.layers.Labels)
 
 
 def _set_labels_data(layer, data: np.ndarray) -> None:
