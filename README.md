@@ -38,46 +38,15 @@ Note: requires Python ≥ 3.11 and napari ≥ 0.8.
 
 ## Usage
 
-There are two ways to use divisualisation: the interactive napari plugin, or the functional API.
+Open **Plugins → divisualisation → Lift tracks & Divisualisation**. The widget has two independent workflows, each in its own box:
 
-### Plugin: lift tracks & overlay errors
+- **Lift all tracks layers** — fold time into a `z` axis so every tracks layer rises out of the image plane into a 3D "spacetime" cone. Scrub the time slider to sweep through the cone; toggle off to restore the flat view exactly.
+- **Divisualisation** — assign ground-truth / predicted / FN-edge / FP-edge tracks layers via the role dropdowns (auto-guessed from layer names), **Compute edge errors** from the GT/predicted tracks plus their labels, and lift with the error colouring. **Color division edges** draws each layer's parent→daughter edges as coloured tails (napari otherwise draws them in uncolourable white).
 
-Open **Plugins → divisualisation → Lift tracks & Divisualisation**. The widget has two workflows, each in its own box with its own lift-amount slider:
+## Examples
 
-- **Lift all tracks layers** — fold time into a `z` axis so every tracks layer rises out of the moving image plane into a 3D "spacetime" cone, keeping each layer's own colouring. Scrub the time slider to sweep through the cone; toggle off to restore the flat 2D view exactly.
-- **Divisualisation** — pick your ground-truth / predicted / FN-edge / FP-edge tracks layers via the role dropdowns (auto-guessed from layer names), optionally **Compute edge errors** from the GT/predicted tracks plus their segmentation labels, and lift with the error-view colouring. A **Color division edges** checkbox draws each selected layer's parent→daughter division edges as coloured track tails (napari otherwise draws them in a fixed, uncolourable white).
+Run in ipython — each loads data into a viewer, adds the tracks and edge-error overlays, and docks the widget:
 
-### Functional API: overlay errors on an existing viewer
-
-Call a single function on a viewer that already holds your data (image, masks,
-tracks — e.g. from motile-tracker) to add the edge errors on top. This works
-for genuine 2D data without a dummy `z` dimension and does not switch the viewer
-into 3D:
-
-```python
-import napari
-from divisualisation import add_edge_error_tracks
-
-viewer = napari.Viewer()          # your existing 2D viewer with your own layers
-# ... add_image / add_labels / add_tracks as usual ...
-
-error_layers = add_edge_error_tracks(viewer, gt_graph, pred_graph)
-```
-
-`gt_graph` and `pred_graph` are matched `traccuracy.TrackingGraph` objects (the
-`.gt_graph` / `.pred_graph` returned by `traccuracy.run_metrics`). Each error
-type becomes its own named `Tracks` layer, so you get napari's built-in eye-icon
-visibility toggles for free — no plugin required.
-
-2D vs 3D is auto-detected from the graph nodes (2D iff nodes have no `z`
-attribute). Pass `scale=(y_scale, x_scale)` (spatial only, no leading time
-entry) to align the overlay with your image/labels layers. See
-`example_programmatic_2d.py`, which uses `add_edge_error_tracks` as part of a
-fully scripted render.
-
-### Examples
-
-Run `example_2d.py` (bacteria) or `example_3d.py` (C. elegans nuclei) in ipython.
-Each loads its data into a napari viewer with the tracks and edge-error overlays
-and docks the widget, so you can toggle the lift and play the time slider
-yourself.
+- `example_2d.py` — bacteria (2D+t).
+- `example_3d.py` — C. elegans nuclei (3D+t, `z` scaled ×10).
+- `example_programmatic_2d.py` — fully scripted render (no GUI): build layers, lift with `SpacetimeLift`, overlay errors with `add_edge_error_tracks`, capture a `napari_animation` keyframe video.
