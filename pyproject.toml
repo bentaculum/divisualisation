@@ -10,7 +10,7 @@ authors = [
 license = {text = "MIT License"}
 description = "Visualize cell tracking errors"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dynamic = ["version"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -19,7 +19,6 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering",
     "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -27,9 +26,11 @@ classifiers = [
 ]
 
 dependencies = [
-    # >=0.7 only for the lift's default camera angles (0.7.0 changed the angle
-    # convention). Safe to relax, but the default 3D view angles would be off.
-    "napari>=0.7",
+    # >=0.8: 0.7.x has a vispy _world_to_layer_units_scale IndexError when a
+    # layer's data is expanded to a volume mid-lift; 0.8 fixed it. 0.8 also
+    # requires Python >=3.11, which is our floor. (0.7.0 first changed the camera
+    # angle convention the default 3D lift view is tuned for.)
+    "napari>=0.8",
     "superqt",
     "napari-animation",
     "magicgui",

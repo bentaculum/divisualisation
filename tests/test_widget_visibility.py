@@ -39,11 +39,14 @@ def test_error_controls_visible_before_toggle():
     w._guess_once()  # run the one-time auto-guess (normally a deferred tick)
     assert not w._lift_errors.value  # toggle off
     controls = (*w._role_combos.values(), w._gt_labels, w._pred_labels, w._compute_btn)
+    # The controls live inside the "Divisualisation" box container (they are not
+    # direct children of the top-level widget after the two-box layout).
+    divis_box_widgets = list(w._divis_box)
     for widget in controls:
         # magicgui reports .visible == False until the parent container is shown,
         # so check enabled + membership here and .visible after show() below.
         assert widget.enabled
-        assert widget in list(w)
+        assert widget in divis_box_widgets
 
     # Once the container is shown (as when docked), the controls are visible even
     # with the toggle still off.

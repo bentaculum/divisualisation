@@ -8,7 +8,7 @@ as long as its layer still exists, and never re-guessing.
 
 These run on a ``ViewerModel`` under offscreen Qt (no GL canvas). A bare
 ViewerModel does NOT auto-connect reset_choices (only add_dock_widget does), so
-the tests call ``w.reset_choices()`` / ``w._guess_once()`` explicitly to stand
+the tests call ``w._reset_role_choices()`` / ``w._guess_once()`` explicitly to stand
 in for what the docked widget gets for free.
 """
 
@@ -66,7 +66,7 @@ def test_adding_layer_keeps_selections_and_lists_options():
     v.add_tracks(
         np.array([[1, t, 5, 5] for t in range(5)], float), name="gt tracks copy"
     )
-    w.reset_choices()  # what napari's add_dock_widget does automatically
+    w._reset_role_choices()  # what napari's add_dock_widget does automatically
 
     assert _roles(w) == before  # every selection preserved
     # Options are NOT emptied: the new layer is present, existing ones remain.
@@ -79,11 +79,11 @@ def test_deleting_layer_keeps_options_and_other_selections():
     v = _make_viewer()
     w = _make_widget(v)
     v.add_tracks(np.array([[3, t, 1, 1] for t in range(5)], float), name="extra")
-    w.reset_choices()
+    w._reset_role_choices()
     before = _roles(w)
 
     v.layers.remove("extra")  # a non-selected layer
-    w.reset_choices()
+    w._reset_role_choices()
 
     # Options still list the real layers (not emptied), selections untouched.
     for combo in w._role_combos.values():
@@ -98,7 +98,7 @@ def test_deleting_selected_layer_clears_only_that_dropdown():
     before = _roles(w)
 
     v.layers.remove("pred tracks")  # the layer in the pred role
-    w.reset_choices()
+    w._reset_role_choices()
 
     after = _roles(w)
     assert after["pred"] == _NONE_CHOICE  # its layer is gone
@@ -112,7 +112,7 @@ def test_layer_event_never_reguesses_after_manual_change():
     # User overrides gt to a non-name-matching layer, then a layer is added.
     w._role_combos["gt"].value = "pred tracks"
     v.add_tracks(np.array([[3, t, 1, 1] for t in range(5)], float), name="extra")
-    w.reset_choices()
+    w._reset_role_choices()
     w._guess_once()  # even if fired again, it's a no-op after the first guess
     # The manual pick stands; no re-guess reclaims "gt tracks" for the gt role.
     assert w._role_combos["gt"].value == "pred tracks"

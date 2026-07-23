@@ -187,10 +187,20 @@ class SpacetimeWidget(Container):
             group.setLayout(layout)
             self.native.layout().addWidget(group)
 
-        # napari's add_dock_widget keeps the choice LISTS in sync (via the
-        # auto-connected reset_choices). We only need to fire the one-time
-        # auto-guess when layers first appear -- it's a no-op once guessed and
-        # never disturbs a selection thereafter.
+        # Keep the role/labels dropdown CHOICES in sync with the layer list.
+        # napari's add_dock_widget auto-connects these events to the docked
+        # widget's reset_choices, but our combos live inside nested box
+        # Containers that the top-level reset_choices doesn't reach, so wire the
+        # same events straight to our own per-combo reset instead.
+        for event in (
+            self._viewer.layers.events.inserted,
+            self._viewer.layers.events.removed,
+            self._viewer.layers.events.reordered,
+            self._viewer.layers.events.renamed,
+        ):
+            event.connect(lambda *_: self._reset_role_choices())
+        # Also fire the one-time auto-guess when layers first appear -- a no-op
+        # once guessed and never disturbs a selection thereafter.
         self._viewer.layers.events.inserted.connect(self._guess_once)
         self._show_error_controls()
         # When the dock widget is torn down, restore any role layers we augmented
