@@ -3,37 +3,63 @@ requires = ["setuptools>=61.0", "wheel", "setuptools_scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "Divisualisation"
+name = "divisualisation"
 authors = [
     {name = "Benjamin Gallusser", email = "bgallusser@gmail.com"}
 ]
 license = {text = "MIT License"}
 description = "Visualize cell tracking errors"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dynamic = ["version"]
 classifiers = [
     "Development Status :: 3 - Alpha",
+    # Required for the napari hub to list this plugin (the hub crawls PyPI for it).
+    "Framework :: napari",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering",
     "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 
 dependencies = [
-    "napari",
+    # >=0.8: 0.7.x has a vispy _world_to_layer_units_scale IndexError when a
+    # layer's data is expanded to a volume mid-lift; 0.8 fixed it. 0.8 also
+    # requires Python >=3.11, which is our floor. (0.7.0 first changed the camera
+    # angle convention the default 3D lift view is tuned for.)
+    "napari>=0.8",
+    "superqt",
     "napari-animation",
+    "magicgui",
     "numpy",
     "networkx",
-    "traccuracy",
+    "scipy",  # used by the vendored napari loader (_napari_loader.py)
+    "tqdm",  # progress bars (utils loaders + vendored napari loader)
+    # load_napari_data (traccuracy PR #358) isn't in a traccuracy release yet, so
+    # it's vendored here (see divisualisation._napari_loader) and we depend on a
+    # released traccuracy instead of the PR git branch (PyPI rejects git deps).
+    # Floor is >=0.4.1: that's where the EdgeFlag string values settled to
+    # "ctc_fn"/"ctc_fp" (our error overlay layers are named after them). No upper
+    # bound. Drop the vendored loader and relax this once #358 is released.
+    "traccuracy>=0.4.1",
 ]
+
+[project.urls]
+"Homepage" = "https://github.com/bentaculum/divisualisation"
+"Source Code" = "https://github.com/bentaculum/divisualisation"
+"Bug Tracker" = "https://github.com/bentaculum/divisualisation/issues"
+"User Support" = "https://github.com/bentaculum/divisualisation/issues"
+
+[project.entry-points."napari.manifest"]
+divisualisation = "divisualisation:napari.yaml"
 
 [project.optional-dependencies]
 dev = [
     "pytest",
+    "pytest-qt",
     "ruff",
     "mypy",
     "pre-commit",
@@ -45,6 +71,9 @@ dev = [
 package-dir = {"" = "src"}
 packages = ["divisualisation"]
 include-package-data = true
+
+[tool.setuptools.package-data]
+divisualisation = ["napari.yaml"]
 
 [tool.ruff]
 target-version = "py311"
@@ -82,6 +111,7 @@ convention = "google"
 
 [tool.pytest.ini_options]
 addopts = "-v -s"
+testpaths = ["tests"]
 
 [tool.setuptools_scm]
 write_to = "src/divisualisation/_version.py"

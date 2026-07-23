@@ -1,3 +1,15 @@
+"""Interactive 3D example (C. elegans nuclei).
+
+Downloads the dataset if needed, then loads it into a normal napari viewer with
+the real 3D volume, tracks, and edge-error overlays, and docks the
+divisualisation plugin widgets. Nothing is scripted: use **Plugins ->
+divisualisation -> Visualize tracks** to fold time into the z axis on demand (on
+top of the real nuclei depth) and the time slider to play through it; toggle it
+back off to return to the plain volume.
+
+Run in ipython:  %run example_3d.py
+"""
+
 import logging
 import os
 import pickle
@@ -15,12 +27,13 @@ from traccuracy.loaders import load_ctc_data
 from traccuracy.matchers import CTCMatcher
 from traccuracy.metrics import CTCMetrics
 
-from divisualisation import Divisualisation
-from divisualisation.utils import load_tiff_timeseries, rescale_intensity
+from divisualisation.utils import (
+    graph_to_napari_tracks,
+    load_tiff_timeseries,
+    rescale_intensity,
+)
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
 pp = pprint.PrettyPrinter(indent=4)
 
 
@@ -43,12 +56,10 @@ if "gt" not in locals():
     ds_name = filename.split(".")[0]
     if not os.path.exists(file_path):
         print(f"Downloading {ds_name} data from the CTC website")
-        # Downloading data
         with DownloadProgressBar(
             unit="B", unit_scale=True, miniters=1, desc=url.split("/")[-1]
         ) as t:
             urllib.request.urlretrieve(url, file_path, reporthook=t.update_to)
-        # Unzip the data
         with zipfile.ZipFile(file_path, "r") as zip_ref:
             zip_ref.extractall(data_dir)
 
@@ -57,10 +68,7 @@ if "gt" not in locals():
         with zipfile.ZipFile(f"{gt_path}.zip", "r") as zip_ref:
             zip_ref.extractall(gt_path.parent)
     gt = load_ctc_data(
-        str(gt_path),
-        str(gt_path / "man_track.txt"),
-        run_checks=False,
-        name="gt",
+        str(gt_path), str(gt_path / "man_track.txt"), run_checks=False, name="gt"
     )
 
     pred_path = Path("data/celegans/RES")
@@ -75,17 +83,19 @@ if "gt" not in locals():
     )
 
     img = load_tiff_timeseries(Path("data/celegans/downloads/Fluo-N3DH-CE/01"))[:195]
-
-    if True:
-        img = np.stack([
-            rescale_intensity(_x, pmin=5, pmax=99.9, clip=False, subsample=16)
-            for _x in tqdm(img, desc="Rescale intensity")
-        ])
+    img = np.stack([
+        rescale_intensity(_x, pmin=5, pmax=99.9, clip=False, subsample=16)
+        for _x in tqdm(img, desc="Rescale intensity")
+    ])
 
     matched_path = "3d_matched.pkl"
     try:
-        ctc_matched = pickle.load(open(matched_path, "rb"))
-    except FileNotFoundError:
+        with open(matched_path, "rb") as f:
+            ctc_matched = pickle.load(f)
+    except Exception as exc:
+        # Missing cache, or a stale pickle from a different traccuracy version
+        # (e.g. an enum member that no longer exists) -- recompute and rewrite.
+        logging.info("Recomputing CTC matching (cache unusable: %s)", exc)
         ctc_results, ctc_matched = run_metrics(
             gt_data=gt,
             pred_data=pred,
@@ -93,43 +103,56 @@ if "gt" not in locals():
             metrics=[CTCMetrics()],
         )
         pp.pprint(ctc_results)
-        pickle.dump(ctc_matched, open(matched_path, "wb"))
+        with open(matched_path, "wb") as f:
+            pickle.dump(ctc_matched, f)
 
     gt_graph = ctc_matched.gt_graph
     pred_graph = ctc_matched.pred_graph
 
-v = napari.current_viewer()
-if v is not None:
-    v.close()
-v = napari.Viewer()
-for layer in v.layers:
-    v.layers.remove(layer)
-v.theme = "dark"
+# The C. elegans acquisition is anisotropic (coarser z than xy), so display the
+# z axis 10x larger. This is a napari display scale only -- it does NOT change
+# the data values or voxel indices, so implicit mask-matching still works.
+# Applied consistently to image, labels and tracks so they stay aligned.
+Z_SCALE = 10
+img_scale = (1, Z_SCALE, 1, 1)  # (t, z, y, x)
 
-divis = Divisualisation(
-    z_scale=5,
-    time_scale=5,
+# A normal viewer with the real 3D volume and tracks loaded flat. No time->z fold.
+viewer = napari.Viewer()
+viewer.theme = "dark"
+viewer.add_image(img, name="raw", colormap="gray", rendering="mip", scale=img_scale)
+# Both GT and predicted segmentation labels, so the plugin's "Compute errors"
+# workflow can match them.
+viewer.add_labels(
+    gt.segmentation, name="gt masks", opacity=0.3, visible=False, scale=img_scale
 )
+viewer.add_labels(pred.segmentation, name="pred masks", opacity=0.3, scale=img_scale)
 
-v = divis.visualize_gt(
-    v,
-    x=img,
-    masks=pred.segmentation,
-    # networkx graph at traccuracy.TrackingGraph.graph
-    gt_graph=gt_graph.graph,
-    pred_graph=pred_graph.graph,
-)
+# GT and predicted tracks, keeping their real z (include_z=True). Drop
+# division-node duplicates so the tracks round-trip cleanly back to a graph. No
+# per-detection segmentation id is needed: the plugin matches detections to the
+# segmentation implicitly, reading each label from the pixel under the point.
+# A 3D+t Tracks layer is 4D (t, z, y, x), so its scale matches the image's
+# (t, z, y, x) -- scale z by Z_SCALE to stay aligned with the image/labels.
+for graph, name in ((gt_graph, "GT tracks"), (pred_graph, "predicted tracks")):
+    tracks, tracks_graph, _ = graph_to_napari_tracks(
+        graph.graph,
+        include_z=True,
+        drop_division_duplicates=True,
+    )
+    viewer.add_tracks(
+        tracks,
+        graph=tracks_graph,
+        name=name,
+        tail_length=5,
+        scale=img_scale,  # (t, z, y, x)
+    )
 
-v = divis.visualize_edge_errors(
-    viewer=v,
-    gt_graph=gt_graph,
-    pred_graph=pred_graph,
-    masks_original=gt.segmentation,
-    masks_tracked=pred.segmentation,
-)
+# Errors are NOT precomputed: open Plugins -> divisualisation ->
+# "Divisualisation" and click "Compute errors" to add the
+# false-negative / false-positive overlays. (Or call add_edge_error_tracks
+# directly, as the flat functional API.)
 
-v.dims.set_current_step(0, 190)
-v.camera.angles = (27.919484296382873, -49.86671510905139, -35.8190766165135)
-v.camera.perspective = 27
+# Dock the plugin widget so you can toggle + play interactively.
+viewer.window.add_plugin_dock_widget("divisualisation", "Lift tracks & Divisualisation")
 
-divis.render(v, name="divisualisation_3d", steps=96)
+napari.run()

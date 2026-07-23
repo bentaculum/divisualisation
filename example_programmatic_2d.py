@@ -1,0 +1,121 @@
+"""Fully programmatic 2D example: build the spacetime view and render a video.
+
+Unlike ``example_2d.py`` (which docks the interactive plugin), this scripts the
+whole pipeline end to end -- load data, build the napari layers, fold time into
+z, add the edge-error overlays, and render an ``.mp4`` -- with no GUI
+interaction. It drives the SAME machinery the plugin uses (``SpacetimeLift`` for
+the lift, ``add_edge_error_tracks`` for the FN/FP overlays), so there is no
+separate scripted rendering path in the core.
+
+Run in ipython:  %run example_programmatic_2d.py
+"""
+
+import logging
+import pprint
+from pathlib import Path
+
+import napari
+import numpy as np
+from napari_animation import Animation
+from tqdm import tqdm
+from traccuracy import EdgeFlag, run_metrics
+from traccuracy.loaders import load_ctc_data
+from traccuracy.matchers import CTCMatcher
+from traccuracy.metrics import CTCMetrics
+
+from divisualisation import SpacetimeLift, add_edge_error_tracks
+from divisualisation.utils import (
+    graph_to_napari_tracks,
+    load_tiff_timeseries,
+    rescale_intensity,
+)
+
+logging.basicConfig(level=logging.INFO)
+pp = pprint.PrettyPrinter(indent=4)
+
+# Color the parent->daughter division edges (the interactive plugin's "Color
+# division edges" checkbox, done functionally here). napari draws a Tracks
+# layer's native graph edges in a fixed, uncolorable white; keeping the shared
+# division node in each daughter chain instead draws the division edge as part
+# of the daughter's colored tail. We then turn off the layer's native (white)
+# graph edges so only the colored ones show.
+COLOR_DIVISION_EDGES = True
+
+
+gt = load_ctc_data("data/bacteria/TRA", "data/bacteria/TRA/man_track.txt", name="gt")
+pred = load_ctc_data("data/bacteria/RES", "data/bacteria/RES/man_track.txt", name="res")
+
+img = load_tiff_timeseries(Path("data/bacteria/img"))
+img = np.stack([
+    rescale_intensity(_x, pmin=5, pmax=99.9, clip=False, subsample=1)
+    for _x in tqdm(img, desc="Rescale intensity")
+])
+
+ctc_results, ctc_matched = run_metrics(
+    gt_data=gt,
+    pred_data=pred,
+    matcher=CTCMatcher(),
+    metrics=[CTCMetrics()],
+)
+pp.pprint(ctc_results)
+
+gt_graph = ctc_matched.gt_graph
+pred_graph = ctc_matched.pred_graph
+
+# Build a plain 2D viewer with image, masks and GT/pred tracks -- exactly the
+# layers example_2d.py sets up, just without docking the plugin.
+viewer = napari.Viewer()
+viewer.theme = "dark"
+viewer.add_image(img, name="raw", colormap="gray")
+viewer.add_labels(pred.segmentation, name="pred masks", opacity=0.3)
+
+for graph, name in ((gt_graph, "GT tracks"), (pred_graph, "predicted tracks")):
+    # With COLOR_DIVISION_EDGES on, keep the shared division node in each child
+    # chain so the division edge is drawn as colored tail; otherwise drop it and
+    # let napari draw the (white) graph edge.
+    tracks, tracks_graph, _ = graph_to_napari_tracks(
+        graph.graph,
+        include_z=False,
+        drop_division_duplicates=not COLOR_DIVISION_EDGES,
+    )
+    layer = viewer.add_tracks(tracks, graph=tracks_graph, name=name, tail_length=5)
+    if COLOR_DIVISION_EDGES:
+        # The division edges now live in the colored tail; hide the layer's
+        # redundant native white graph edges.
+        layer.display_graph = False
+
+# Add the false-negative / false-positive edge overlays (each its own Tracks
+# layer, named after its EdgeFlag, e.g. "ctc_fn" / "ctc_fp").
+error_layers = add_edge_error_tracks(viewer, gt_graph, pred_graph)
+
+# Fold time into z with the same engine the plugin uses. Map each layer to its
+# role so the lift applies the error-view coloring (GT / pred / FN / FP); the
+# predicted-tracks layer is hidden, since its errors are shown by the overlays.
+viewer.layers["predicted tracks"].visible = False
+role_names = {"gt": "GT tracks", "pred": "predicted tracks"}
+for role, flag in (
+    ("fn_edges", EdgeFlag.CTC_FALSE_NEG),
+    ("fp_edges", EdgeFlag.CTC_FALSE_POS),
+):
+    layer = error_layers[flag]
+    if layer is not None:
+        role_names[role] = layer.name
+
+lift = SpacetimeLift(viewer, lift_scale=12)
+lift.apply(role_names)  # goes 3D, folds time into z, applies the error-view look
+viewer.camera.zoom = 0.5  # pull back so the whole spacetime cone stays in frame
+
+# Render a video by scrubbing the time slider, which sweeps the clipping plane
+# through the cone. Keyframes: sweep up to reveal the full tree, hold on it for
+# half as long as the sweep, then sweep back down to the start.
+last = viewer.dims.nsteps[0] - 1
+animation = Animation(viewer)
+viewer.dims.set_current_step(0, 0)
+animation.capture_keyframe()  # start: plane at the bottom
+viewer.dims.set_current_step(0, last)
+animation.capture_keyframe(steps=60)  # sweep up to the full tree
+animation.capture_keyframe(steps=30)  # hold on the full tree (~half the sweep)
+viewer.dims.set_current_step(0, 0)
+animation.capture_keyframe(steps=60)  # sweep back down to the start
+animation.animate("divisualisation_2d.mp4", fps=12, canvas_only=True)
+print("Saved divisualisation_2d.mp4")

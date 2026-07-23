@@ -5,4 +5,7 @@ try:
 except Exception:
     __version__ = "unknown"
 
-from .divisualisation import Divisualisation
+from .errors import add_edge_error_tracks
+from .lift import SpacetimeLift
+
+__all__ = ["SpacetimeLift", "add_edge_error_tracks"]

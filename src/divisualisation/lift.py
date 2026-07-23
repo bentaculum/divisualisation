@@ -1,0 +1,656 @@
+"""Reversible spacetime lift for an existing napari viewer.
+
+Turns a flat 2D+time setup into the 3D "spacetime" view on demand: selected
+tracks layers fold time into a z axis (a cone rising out of the image plane),
+while image/labels stay planar but get a per-timepoint clipping plane that
+sweeps through as you scrub time. Everything is snapshotted on apply and
+restored exactly on revert, so it can be toggled on and off from the GUI.
+"""
+
+import copy
+import logging
+from contextlib import contextmanager
+
+import napari
+import numpy as np
+from napari.utils.colormaps.colormap_utils import vispy_or_mpl_colormap
+
+logger = logging.getLogger(__name__)
+
+
+# Every lifted layer gets a single constant color property, so each renders as
+# one flat color; the actual color is the layer's active colormap (chosen in the
+# GUI dropdown). The Tracks layer min-max normalizes the property before mapping,
+# so a constant value collapses to one color regardless of the value used --
+# ``color_value`` is thus bookkeeping only (0.5 for gt/pred, 1.0 for errors).
+_DEFAULT_COLOR_VALUE = 0.5
+
+# The four track roles the lift understands and the "error view" look each one
+# takes on toggle-on (all reverted on toggle-off). Matches the original
+# Divisualisation renderer: GT -> Greens, predicted -> Wistia, edge errors ->
+# cool with a doubled tail width. ``colormap`` is a matplotlib/vispy name;
+# ``color_value`` is the raw value mapped through the colormap (fn 0 / fp 1
+# match main, giving cool's cyan / magenta endpoints).
+ROLES = ("gt", "pred", "fn_edges", "fp_edges")
+ROLE_DISPLAY: dict[str, dict] = {
+    "gt": {"colormap": "Greens", "width_factor": 1, "color_value": 0.5},
+    "pred": {"colormap": "Wistia", "width_factor": 1, "color_value": 0.5},
+    "fn_edges": {"colormap": "cool", "width_factor": 2, "color_value": 0.0},
+    "fp_edges": {"colormap": "cool", "width_factor": 2, "color_value": 1.0},
+}
+# Shared look applied to every lifted track layer regardless of role. Includes
+# head_length=0 so the clipping plane cuts every layer identically -- error
+# layers are created with head_length=1, which drew them a couple of frames
+# past the plane relative to GT/pred (head_length=0).
+_COMMON_DISPLAY = {
+    "tail_length": 1000,
+    "head_length": 0,
+    "blending": "translucent_no_depth",
+    "opacity": 1.0,
+}
+# Base tail width; error roles get ``width_factor`` x this.
+_BASE_TAIL_WIDTH = 2
+
+# Tracks-layer attributes NOT snapshotted generically as "display state": data
+# and geometry (restored explicitly), color (color_by/colormap/properties, which
+# are coupled and order-sensitive), and internal/interaction/identity emitters.
+# Everything else the layer exposes as an event (tail_width, opacity,
+# head_length, tail_length, blending, display_tail, ...) is captured
+# generically, so new napari display params are picked up without naming them.
+_NON_DISPLAY_ATTRS = frozenset({
+    "data",
+    "set_data",
+    "reload",
+    "loaded",
+    "refresh",
+    "rebuild_graph",
+    "rebuild_tracks",
+    "scale",
+    "translate",
+    "affine",
+    "rotate",
+    "shear",
+    "extent",
+    "_extent_augmented",
+    "properties",
+    "color_by",
+    "colormap",
+    "name",
+    "metadata",
+    "thumbnail",
+    "status",
+    "help",
+    "cursor",
+    "cursor_size",
+    "_overlays",
+    "mode",
+    "editable",
+    "locked",
+    "mouse_pan",
+    "mouse_zoom",
+    "scale_factor",
+    "units",
+    "axis_labels",
+    "projection_mode",
+    "display_id",
+    # The widget owns display_graph: it toggles it off to hide a source layer's
+    # native white graph edges when drawing its own colored division edges. The
+    # engine must not snapshot/remember/re-apply it, or it would clobber that.
+    "display_graph",
+    "visible",
+})
+
+
+def _display_attrs(layer):
+    """The Tracks layer's user-facing display attributes, derived from its event
+    emitters minus the non-display set. Generic, so it tracks napari changes.
+    """
+    return sorted(set(layer.events.emitters) - _NON_DISPLAY_ATTRS)
+
+
+# Default camera rotation for the first lift: a near-orthogonal 3D view of the
+# image plane. Tuned for napari >= 0.7, which overhauled the camera-angle
+# convention (0.7.0, a breaking change: default angles (0,0,90) -> (0,0,0) and
+# intuitive right-handed rotations). Pre-0.7 angles were different.
+_DEFAULT_LIFT_ANGLES = (-15, -2, -65)
+_DEFAULT_LIFT_PERSPECTIVE = 35
+_DEFAULT_LIFT_ZOOM = 1
+
+
+class SpacetimeLift:
+    """Apply and revert the time->z spacetime lift on an existing viewer.
+
+    Args:
+        viewer: The napari viewer to transform.
+        lift_scale: How far tracks lift per unit time. Higher = steeper cone.
+    """
+
+    def __init__(
+        self,
+        viewer: napari.Viewer,
+        lift_scale: float = 12,
+        camera_store: dict | None = None,
+    ):
+        self._viewer = viewer
+        self._lift_scale = lift_scale
+        self._applied = False
+        # Internal state keyed by the LAYER OBJECT (not its name, which the
+        # user can change): renaming a lifted layer must not strand it.
+        self._snapshots: dict = {}
+        self._viewer_snapshot: dict = {}
+        # 5-column base tracks (z zeroed) per lifted layer, so changing the lift
+        # amount is a cheap recompute from the original time column.
+        self._track_bases: dict = {}
+        # Remembered lifted-view camera. Held in a shared dict so several lift
+        # instances (e.g. the two plugin toggles) share ONE camera across views;
+        # toggling off then on returns to the same 3D view. Pass the same
+        # ``camera_store`` to share it. None until the first lift.
+        self._camera_store = {} if camera_store is None else camera_store
+        # Remembered lifted-view display params per layer (layer name -> {attr:
+        # value}), so tweaks made while lifted (e.g. a wider tail) persist across
+        # toggling the lift off and on. Per-instance (NOT shared), so each view
+        # keeps its own layer-control settings.
+        self._lift_display: dict = {}
+        # Layer objects whose ``visible`` event we connected on apply; held so we
+        # can disconnect on revert even if a layer was removed from the viewer.
+        self._visible_connected: list = []
+
+    @property
+    def applied(self) -> bool:
+        return self._applied
+
+    @property
+    def _lift_camera(self):
+        return self._camera_store.get("camera")
+
+    @_lift_camera.setter
+    def _lift_camera(self, value):
+        self._camera_store["camera"] = value
+
+    def _camera_state(self) -> dict:
+        cam = self._viewer.camera
+        return {
+            "center": tuple(cam.center),
+            "zoom": cam.zoom,
+            "angles": tuple(cam.angles),
+            "perspective": cam.perspective,
+        }
+
+    def _set_camera_state(self, state: dict) -> None:
+        cam = self._viewer.camera
+        cam.center = state["center"]
+        cam.zoom = state["zoom"]
+        cam.angles = state["angles"]
+        cam.perspective = state["perspective"]
+
+    @property
+    def lift_scale(self) -> float:
+        return self._lift_scale
+
+    @lift_scale.setter
+    def lift_scale(self, value: float):
+        self._lift_scale = value
+        if self._applied:
+            self._refold_tracks()
+            self._update_sweep()
+
+    def apply(self, layer_roles, extra_layers=()):
+        """Lift the declared track layers; sweep-clip image/labels; go 3D.
+
+        Args:
+            layer_roles: Either a mapping ``{role: layer_name}`` (role is one of
+                ``ROLES``) or a plain iterable of layer names. A mapping applies
+                each role's "error view" look (including its colormap); a plain
+                iterable applies only the shared spacetime look (tail length /
+                width / blending / opacity), keeping each layer's own coloring.
+                Prior display settings are snapshotted and restored on revert.
+                All roles are optional; unknown or missing names are skipped.
+            extra_layers: Additional tracks-layer names to lift with the shared
+                look only (own coloring), on top of ``layer_roles``. Lets the
+                error workflow lift every tracks layer -- role layers get the
+                error-view colors, the rest keep their own.
+
+        Idempotent: calling apply while already applied is a no-op.
+        """
+        if self._applied:
+            return
+        # Normalize to {layer_name: role|None}.
+        if isinstance(layer_roles, dict):
+            name_to_role = {name: role for role, name in layer_roles.items() if name}
+        else:
+            name_to_role = {name: None for name in layer_roles}
+        # Extra layers lift with own coloring (role None), unless already a role.
+        for name in extra_layers:
+            name_to_role.setdefault(name, None)
+
+        # Capture the current timepoint BEFORE mutating: lifting layer data
+        # resets it, and we want the slider to stay put across the toggle.
+        current_time = self._viewer.dims.current_step[0]
+        # Also capture the FULL pre-lift step so revert can restore every axis
+        # the flat view had -- notably the z slider for genuine 3D+t data, which
+        # exists flat and should survive the round trip (time alone is restored
+        # while lifted, since z is folded/invented there).
+        pre_lift_step = tuple(self._viewer.dims.current_step)
+
+        for layer in self._viewer.layers:
+            self._snapshots[layer] = self._snapshot_layer(layer)
+
+        # Mutate all layers to a consistent ndim before any render, so napari
+        # never draws a mix of 3-ndim and 4-ndim layers (which raises an
+        # IndexError on the not-yet-lifted layer's extent).
+        with self._block_layer_events():
+            for layer in self._viewer.layers:
+                if layer.name in name_to_role and _is_tracks(layer):
+                    self._lift_tracks_layer(layer)
+                    role = name_to_role[layer.name]
+                    if role is not None:
+                        self._apply_display(layer, role)
+                    else:
+                        # Lift-all: shared look only, keep the layer's coloring.
+                        self._apply_common_display(layer)
+                        self._restore_lift_display(layer)
+                else:
+                    self._expand_to_volume(layer)
+
+        self._viewer_snapshot = {
+            "ndisplay": self._viewer.dims.ndisplay,
+            "camera": self._camera_state(),
+            "current_time": current_time,
+            "pre_lift_step": pre_lift_step,
+        }
+        self._viewer.dims.ndisplay = 3
+        self._viewer.dims.events.point.connect(self._update_sweep)
+        self._applied = True
+        if self._lift_camera is not None:
+            # Return to the lifted view the user last had.
+            self._set_camera_state(self._lift_camera)
+        else:
+            # First lift: frame the extent, then take a near-orthogonal 3D angle.
+            self._viewer.reset_view()
+            self._viewer.camera.angles = _DEFAULT_LIFT_ANGLES
+            self._viewer.camera.perspective = _DEFAULT_LIFT_PERSPECTIVE
+            self._viewer.camera.zoom = _DEFAULT_LIFT_ZOOM
+            # Pull the camera center back along depth (axis 0) to half the
+            # lifted cone's height, keeping the framed y/x.
+            n_timepoints = self._viewer.dims.nsteps[0]
+            center = list(self._viewer.camera.center)
+            center[0] = 0.5 * self._lift_scale * n_timepoints
+            self._viewer.camera.center = center
+        # Restore the timepoint (reset_view / data changes reset it); this also
+        # drives _update_sweep to the right slice via the point event. Set only
+        # the time axis, since ndim grew from 3 to 4.
+        self._viewer.dims.set_current_step(0, current_time)
+        self._update_sweep()
+        # A layer hidden at lift time doesn't get its lifted transform pushed to
+        # the GPU; when later shown it would render at a stale position. Re-sync
+        # it on show.
+        self._visible_connected = []
+        for layer in self._track_bases:
+            layer.events.visible.connect(self._on_layer_visible)
+            self._visible_connected.append(layer)
+
+    def _on_layer_visible(self, event):
+        if not self._applied:
+            return
+        layer = event.source
+        if getattr(layer, "visible", False) and layer in self._track_bases:
+            # Re-apply the current sweep to this layer and force a redraw so the
+            # freshly shown layer picks up its lifted transform.
+            self._update_sweep()
+            layer.refresh()
+
+    def revert(self):
+        """Restore every layer and the viewer to their pre-apply state."""
+        if not self._applied:
+            return
+        # Disconnect before restoring so the callbacks cannot fire mid-revert.
+        self._viewer.dims.events.point.disconnect(self._update_sweep)
+        for layer in self._visible_connected:
+            layer.events.visible.disconnect(self._on_layer_visible)
+        self._visible_connected = []
+
+        # Keep the slider where it is across the toggle (restoring data resets it).
+        current_time = self._viewer.dims.current_step[0]
+
+        # Remember the lifted view (camera + per-layer display params) BEFORE
+        # restoring layers, so toggling back on returns to it. Restoring layer
+        # data changes the scene extent and makes napari re-zoom / reset the
+        # display, so capturing after would lose these.
+        self._lift_camera = self._camera_state()
+        self._capture_lift_display()
+
+        for layer, snap in self._snapshots.items():
+            self._restore_layer(layer, snap)
+
+        self._viewer.dims.ndisplay = self._viewer_snapshot["ndisplay"]
+        self._set_camera_state(self._viewer_snapshot["camera"])
+        # Restore the pre-lift slider position on every axis that still exists
+        # after the layers are restored (e.g. z for 3D+t data), then keep the
+        # time axis where the user left it during the lift.
+        pre_lift_step = self._viewer_snapshot.get("pre_lift_step", ())
+        ndim = self._viewer.dims.ndim
+        for axis, step in enumerate(pre_lift_step):
+            if axis < ndim:
+                self._viewer.dims.set_current_step(axis, step)
+        self._viewer.dims.set_current_step(0, current_time)
+        self._applied = False
+        self._snapshots.clear()
+        self._track_bases.clear()
+        self._viewer_snapshot = {}
+
+    # --- snapshot / restore -------------------------------------------------
+
+    @staticmethod
+    def _snapshot_layer(layer) -> dict:
+        # Snapshot the data so revert can reassign it. The lift only ever
+        # REASSIGNS a layer's .data (folding tracks, expanding image/labels to a
+        # volume) -- it never mutates the array in place -- so we can keep a
+        # reference for the big image/labels volumes instead of deep-copying
+        # them. Tracks data is small and gets rebuilt, so copy it for isolation.
+        # (deepcopy of a multi-hundred-MB label array was ~half the toggle time.)
+        if _is_tracks(layer):
+            snap_data = np.asarray(layer.data).copy()
+        else:
+            snap_data = layer.data
+        snap = {
+            "data": snap_data,
+            "scale": tuple(layer.scale),
+            "translate": tuple(layer.translate),
+            "clipping_planes": copy.deepcopy([
+                p.dict() for p in layer.experimental_clipping_planes
+            ]),
+        }
+        # Display settings only exist on Tracks layers; snapshot them so the
+        # "error view" look can be fully reverted on toggle-off. All exposed
+        # display attributes are captured generically (tail_width, opacity,
+        # head_length, ...); color (color_by/colormap/properties) is kept
+        # separate because those are coupled and must be restored in order.
+        if _is_tracks(layer):
+            snap["graph"] = dict(layer.graph)
+            snap["display"] = {a: getattr(layer, a) for a in _display_attrs(layer)}
+            snap["color"] = {
+                "colormap": layer.colormap,
+                "colormaps_dict": dict(layer.colormaps_dict),
+                "color_by": layer.color_by,
+                "properties": {k: v.copy() for k, v in layer.properties.items()},
+            }
+        return snap
+
+    @staticmethod
+    def _restore_layer(layer, snap: dict):
+        # Restore data (and graph) FIRST: setting a Tracks layer's .data resets
+        # its properties/graph, so display state must be restored afterwards.
+        if _is_labels(layer):
+            _set_labels_data(layer, snap["data"])
+        else:
+            # Setting .data clears features to just {track_id}; napari warns if
+            # the active color_by (e.g. a lifted "_lift_*" key) is gone at that
+            # instant. Fall back to track_id first; the snapped color_by is
+            # restored below once its property is back.
+            layer.color_by = "track_id"
+            layer.data = snap["data"]
+            if "graph" in snap:
+                layer.graph = snap["graph"]
+        color = snap.get("color")
+        if color is not None:
+            # Restore properties before color_by so the key exists.
+            layer.properties = color["properties"]
+            if color["color_by"] in layer.properties or not layer.properties:
+                layer.color_by = color["color_by"]
+            layer.colormap = color["colormap"]
+            layer.colormaps_dict = color["colormaps_dict"]  # drops _lift_* entries
+        display = snap.get("display")
+        if display is not None:
+            for attr, value in display.items():
+                try:
+                    setattr(layer, attr, value)
+                except (AttributeError, ValueError):
+                    # A napari emitter that isn't a writable property; skip it.
+                    pass
+        layer.scale = snap["scale"]
+        layer.translate = snap["translate"]
+        layer.experimental_clipping_planes = snap["clipping_planes"]
+
+    @contextmanager
+    def _block_layer_events(self):
+        """Block every layer's events so the ndim swap does not trigger a render
+        until all layers are consistently 4D.
+        """
+        blockers = [layer.events.blocker() for layer in self._viewer.layers]
+        for b in blockers:
+            b.__enter__()
+        try:
+            yield
+        finally:
+            for b in blockers:
+                b.__exit__(None, None, None)
+
+    @staticmethod
+    def _apply_common_display(layer):
+        """Apply the shared spacetime look from the original renderer
+        (tail_length, blending, opacity, base tail width) to a lifted track
+        layer, leaving its coloring untouched. Prior settings are already
+        snapshotted so toggle-off restores them.
+        """
+        for attr, value in _COMMON_DISPLAY.items():
+            setattr(layer, attr, value)
+        layer.tail_width = _BASE_TAIL_WIDTH
+
+    @staticmethod
+    def _apply_colormap(layer, colormap, key, value=_DEFAULT_COLOR_VALUE):
+        """Color a lifted track layer flat: a constant property (all edges =
+        ``value``) under ``key``, mapped through ``colormap`` via colormaps_dict.
+        Using colormaps_dict maps ``value`` RAW (the Tracks layer only 0-1
+        normalizes when using layer.colormap, not colormaps_dict), matching the
+        original renderer. Prior coloring is snapshotted so revert restores it.
+        """
+        layer.properties = {
+            **dict(layer.properties),
+            key: np.full(len(layer.data), value),
+        }
+        layer.colormaps_dict = {
+            **dict(layer.colormaps_dict),
+            key: vispy_or_mpl_colormap(colormap),
+        }
+        layer.color_by = key
+
+    def _apply_display(self, layer, role):
+        """Give a lifted track layer the "error view" look for its role.
+
+        Prior display settings are already snapshotted.
+        """
+        spec = ROLE_DISPLAY.get(role)
+        if spec is None:
+            return
+        self._apply_common_display(layer)
+        self._apply_colormap(
+            layer, spec["colormap"], f"_lift_{role}", spec["color_value"]
+        )
+        # Error roles get a wider tail than the shared base.
+        layer.tail_width = _BASE_TAIL_WIDTH * spec["width_factor"]
+        # Re-apply any display tweaks the user made in a previous lifted view so
+        # they persist across toggling (e.g. a wider tail set while lifted).
+        self._restore_lift_display(layer)
+
+    def _restore_lift_display(self, layer):
+        """Overlay this layer's remembered lifted-view display params (if any)
+        onto the freshly applied role/common look.
+        """
+        for attr, value in self._lift_display.get(layer, {}).items():
+            setattr(layer, attr, value)
+
+    def _capture_lift_display(self):
+        """Remember each lifted layer's current display params, so re-lifting
+        restores them (independent of the layer's non-lifted settings).
+        """
+        for layer in self._track_bases:
+            self._lift_display[layer] = {
+                a: getattr(layer, a) for a in _display_attrs(layer)
+            }
+
+    # --- transforms ---------------------------------------------------------
+
+    def _lift_tracks_layer(self, layer):
+        """Fold time into z for one tracks layer, matching the original render."""
+        if layer in self._track_bases:
+            # Already lifted (its live data is folded): re-fold from the stored
+            # flat base rather than the current data, so we never double-fold.
+            base = self._track_bases[layer]
+        else:
+            data = np.asarray(layer.data, dtype=float)
+            if data.shape[1] == 4:
+                # 2D + t: [id, t, y, x] -> [id, t, z=0, y, x]. The inserted z is
+                # 0, so lifting invents a z purely from time.
+                base = np.insert(data, 2, 0.0, axis=1)
+            else:
+                # 3D + t: keep the real z; lifting adds the time offset on top.
+                base = data.copy()
+            self._track_bases[layer] = base
+        # Reassigning .data resets the layer's graph and properties; restore both
+        # so division/lineage edges keep drawing and any per-detection properties
+        # the layer carries survive the lift.
+        graph = dict(layer.graph)
+        properties = {k: v.copy() for k, v in layer.properties.items()}
+        color_by = layer.color_by
+        # Read the z display scale BEFORE reassigning .data (which can reset the
+        # transforms when ndim changes 4->5). Honors an anisotropic z.
+        z_scale = self._z_scale(layer)
+        # Setting .data clears features to just {track_id}; napari warns if the
+        # active color_by is gone at that moment. Fall back to track_id first,
+        # then restore the real coloring once its property is back.
+        layer.color_by = "track_id"
+        # napari skips updating a HIDDEN layer's ndim/extent when its data
+        # changes, so folding a hidden layer from 4->5 columns leaves a stale
+        # 3-col extent that crashes the 3D draw (index 3 out of bounds). Set the
+        # data while momentarily visible so the extent updates, then restore the
+        # layer's original visibility.
+        layer.data = self._folded(base, z_scale)
+        layer.graph = graph
+        layer.properties = properties
+        if color_by in layer.properties or not layer.properties:
+            layer.color_by = color_by
+
+    def _folded(self, base: np.ndarray, z_scale: float = 1.0) -> np.ndarray:
+        data = base.copy()
+        # z <- z - (lift_scale / z_scale) * t, so tracks rise out of the plane
+        # over time. The depth axis points towards the viewer since napari 0.6,
+        # so the time term is subtracted to lift upward. Preserves any real z.
+        #
+        # Divide by the layer's z DISPLAY scale so the lift is in WORLD units:
+        # napari renders z at ``z_scale * z_data``, so with an anisotropic layer
+        # (e.g. z shown 10x for the C. elegans volume) an unscaled offset would
+        # make the cone z_scale-times too steep and mis-align the time sweep. In
+        # world space the offset is then exactly ``lift_scale * t``, matching the
+        # (world-unit) clip position and translate in _update_sweep.
+        data[:, 2] = base[:, 2] - (self._lift_scale / z_scale) * base[:, 1]
+        return data
+
+    @staticmethod
+    def _z_scale(layer) -> float:
+        """The layer's z (depth) display scale in world units.
+
+        For a genuine 3D+t layer the scale is (t, z, y, x) and z is index 1, so
+        we honor an anisotropic z (e.g. 10x for the C. elegans volume). For a
+        2D+t layer (scale (t, y, x), len 3) z is invented by the lift and has no
+        display scale, so return 1.0. Also 1.0 if scale is unavailable.
+        """
+        scale = getattr(layer, "scale", None)
+        if scale is None or len(scale) < 4:
+            return 1.0  # 2D+t (or unknown): invented z, no anisotropy to honor
+        return float(scale[1])
+
+    def _refold_tracks(self):
+        # Re-folding reassigns layer.data, which resets the layer's graph AND
+        # its coloring (properties / color_by / colormap). Preserve and restore
+        # them so changing the lift amount doesn't drop the error-view colors.
+        for layer, base in self._track_bases.items():
+            graph = dict(layer.graph)
+            properties = {k: v.copy() for k, v in layer.properties.items()}
+            color_by = layer.color_by
+            colormap = layer.colormap
+            z_scale = self._z_scale(layer)
+            # Setting .data clears features to just {track_id}, and napari warns
+            # ("... not present in features. Falling back to track_id") if the
+            # active color_by (e.g. a custom "_lift_*" key) is gone at that
+            # moment. Point color_by at the always-present track_id first, then
+            # restore the real coloring once its property is back.
+            layer.color_by = "track_id"
+            layer.data = self._folded(base, z_scale)
+            layer.graph = graph
+            layer.properties = properties
+            if color_by in layer.properties or not layer.properties:
+                layer.color_by = color_by
+            layer.colormap = colormap
+
+    @staticmethod
+    def _expand_to_volume(layer):
+        """Give a 2D+t image/labels layer a singleton z so it shares the 3D dims.
+
+        The new z axis is inserted into scale/translate too, so the layer's
+        transform stays consistent with the expanded (t, z, y, x) data.
+        """
+        data = layer.data
+        if getattr(data, "ndim", 0) != 3:
+            return
+        scale = list(layer.scale)
+        translate = list(layer.translate)
+        if _is_labels(layer):
+            _set_labels_data(layer, np.expand_dims(data, 1))
+        else:
+            layer.data = np.expand_dims(data, 1)
+        # Insert the z entry after time (index 1). Growing the data reset the
+        # transforms to 4D defaults; overwrite with the intended values.
+        scale.insert(1, 1.0)
+        translate.insert(1, 0.0)
+        layer.scale = scale
+        layer.translate = translate
+
+    def _update_sweep(self, event=None):
+        """Sync each lifted tracks layer to the current timepoint.
+
+        Clip the tracks at ``-t * lift_scale`` along the folded-time (z) axis
+        and translate them by ``+t * lift_scale`` there, so the current
+        timepoint's slice lands on the fixed image plane and later frames recede
+        above it as you scrub. Signs follow the fold (``z = z - lift_scale * t``,
+        upward under napari 0.6+ axis directions). Image/labels are untouched.
+        """
+        t = self._viewer.dims.point[0]
+        clipping_planes = [
+            # Disabled placeholder with a unit normal; a zero normal would trip
+            # napari's normal-normalization ("invalid value in divide").
+            {"position": (0, 0, 0), "normal": (1, 0, 0), "enabled": False},
+            {
+                "position": (-t * self._lift_scale, 0, 0),
+                "normal": (1, 0, 0),
+                "enabled": True,
+            },
+        ]
+        for layer in self._track_bases:
+            layer.experimental_clipping_planes = clipping_planes
+            layer.translate = [0, self._lift_scale * t, 0, 0]
+
+
+def _is_tracks(layer) -> bool:
+    # isinstance, NOT type(layer).__name__ == "Tracks": when the widget is docked
+    # as a plugin, napari wraps layers in a PublicOnlyProxy whose class name is
+    # "PublicOnlyProxy", but isinstance still sees the wrapped Tracks type.
+    return isinstance(layer, napari.layers.Tracks)
+
+
+def _is_labels(layer) -> bool:
+    return isinstance(layer, napari.layers.Labels)
+
+
+def _set_labels_data(layer, data: np.ndarray) -> None:
+    """Set a Labels layer's data, bypassing a napari ndim-change bug.
+
+    napari's ``Labels.data`` setter pre-sets ``_ndim`` to the new value before
+    ``_update_dims()``, so a 3D<->4D change is not reflected in the layer's
+    transforms and the vispy render path hits a matmul shape error. Setting
+    ``_data`` directly keeps ``_ndim`` at the old value until ``_update_dims``
+    runs, so the transforms grow/shrink correctly.
+    """
+    layer._data = layer._ensure_int_labels(data)
+    layer._update_dims()
+    layer.events.data(value=layer.data)
+    layer._reset_editable()

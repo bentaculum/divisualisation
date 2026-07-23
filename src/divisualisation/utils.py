@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Sequence
 from pathlib import Path
 
 import networkx as nx
@@ -198,9 +199,21 @@ def linear_chains(G: nx.DiGraph):
 
 def graph_to_napari_tracks(
     graph: nx.DiGraph,
-    properties: list[str] = [],
+    properties: Sequence[str] = (),
+    include_z: bool = True,
+    drop_division_duplicates: bool = False,
 ):
-    """Convert a track graph to napari tracks."""
+    """Convert a track graph to napari tracks.
+
+    Args:
+        graph: Track graph with node attributes ``t``, ``y``, ``x`` and
+            optionally ``z``.
+        properties: Node attribute names to carry over as track properties.
+        include_z: If ``True`` (default), emit 5-column ``[id, t, z, y, x]``
+            tracks, using ``z=1`` as a pseudo dimension for 2D nodes. If
+            ``False``, emit 4-column ``[id, t, y, x]`` tracks, which is what
+            genuinely 2D data needs (no dummy ``z``).
+    """
     # each tracklet is a linear chain in the graph
     chains = tuple(linear_chains(graph))
 
@@ -224,9 +237,11 @@ def graph_to_napari_tracks(
         start = cs[0]
         if start in track_end_to_track_id and len(cs) > 1:
             tracks_graph[label] = track_end_to_track_id[start]
-            # nodes = cs[1:]
-            # Include division edges as first edge of chain
-            nodes = cs
+            # By default keep the shared division node in the child chain so the
+            # napari renderer draws the division edge. When round-tripping back
+            # into a graph, drop it (the division is carried by tracks_graph)
+            # to avoid a duplicate detection / spurious zero-length edge.
+            nodes = cs[1:] if drop_division_duplicates else cs
         else:
             nodes = cs
 
@@ -234,9 +249,12 @@ def graph_to_napari_tracks(
             node = graph.nodes[c]
             # TODO expose attribute names on graph
             t = node["t"]
-            # Pseudo-3D: z is not used, but can be set to 1
-            z = node["z"] if "z" in node else 1
-            coord = (z, node["y"], node["x"])
+            if include_z:
+                # Pseudo-3D: z is not used for 2D data, but can be set to 1
+                z = node["z"] if "z" in node else 1
+                coord = (z, node["y"], node["x"])
+            else:
+                coord = (node["y"], node["x"])
             tracks.append([label, t, *list(coord)])
 
             for p in properties:
