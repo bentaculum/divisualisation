@@ -35,6 +35,7 @@ def test_lift_all_keeps_coloring(make_napari_viewer):
         )
 
     w = SpacetimeWidget(viewer)
+    w._guess_once()  # deferred in the widget; run now so name-guessed roles are set
     w._lift_amount.value = 15
     w._lift_all.value = True
 
@@ -60,6 +61,7 @@ def test_lift_all_sync_matches_main(make_napari_viewer):
     viewer.add_image(np.zeros((5, 8, 8)), name="img")
     viewer.add_tracks(np.array([[1, t, 4, 4] for t in range(5)], float), name="tracks")
     w = SpacetimeWidget(viewer)
+    w._guess_once()  # deferred in the widget; run now so name-guessed roles are set
     w._lift_amount.value = 10
     w._lift_all.value = True
 
@@ -83,6 +85,7 @@ def test_errors_toggle_applies_role_look(make_napari_viewer):
     )
 
     w = SpacetimeWidget(viewer)
+    w._guess_once()  # deferred in the widget; run now so name-guessed roles are set
     assert w._role_combos["gt"].value == "GT tracks"  # name-guessed
 
     w._lift_amount.value = 15
@@ -110,6 +113,7 @@ def test_toggles_are_mutually_exclusive(make_napari_viewer):
         np.array([[1, t, 2, 3] for t in range(4)], float), name="GT tracks"
     )
     w = SpacetimeWidget(viewer)
+    w._guess_once()  # deferred in the widget; run now so name-guessed roles are set
     w._lift_all.value = True
     assert w._lift_all.value and not w._lift_errors.value
     # Turning on errors turns off lift-all.
@@ -135,6 +139,7 @@ def test_errors_controls_hidden_until_errors_toggle(make_napari_viewer):
     viewer.add_labels(np.zeros((2, 8, 8), int), name="pred masks")
 
     w = SpacetimeWidget(viewer)
+    w._guess_once()  # deferred in the widget; run now so name-guessed roles are set
     w.show()  # show the container so child .visible reflects the set value
     QApplication.processEvents()
     QApplication.processEvents()
@@ -170,6 +175,7 @@ def test_role_change_relifts_live(make_napari_viewer):
         np.array([[2, t, 8, 8] for t in range(6)], float), name="other tracks"
     )
     w = SpacetimeWidget(viewer)
+    w._guess_once()  # deferred in the widget; run now so name-guessed roles are set
     w._lift_errors.value = True
 
     # Dropdowns are editable while the Divisualisation toggle is on.
@@ -215,6 +221,7 @@ def test_compute_during_lift_reapplies_and_keeps_dropdowns(
     monkeypatch.setattr(errors_mod, "compute_edge_errors_from_layers", fake_compute)
 
     w = SpacetimeWidget(viewer)
+    w._guess_once()  # deferred in the widget; run now so name-guessed roles are set
     w._lift_errors.value = True  # lift GT/pred
     assert viewer.layers["GT tracks"] in w._lift._track_bases
 
@@ -275,6 +282,7 @@ def test_compute_passes_gt_spatial_scale_to_error_overlays(
     monkeypatch.setattr(errors_mod, "compute_edge_errors_from_layers", fake_compute)
 
     w = SpacetimeWidget(viewer)
+    w._guess_once()  # deferred in the widget; run now so name-guessed roles are set
     w._role_combos["gt"].value = "GT tracks"
     w._role_combos["pred"].value = "predicted tracks"
     w._gt_labels.value = "gt masks"
@@ -318,6 +326,7 @@ def test_compute_with_division_edges_sees_real_graph(make_napari_viewer, monkeyp
     monkeypatch.setattr(errors_mod, "compute_edge_errors_from_layers", fake_compute)
 
     w = SpacetimeWidget(viewer)
+    w._guess_once()  # deferred in the widget; run now so name-guessed roles are set
     w._division_edges.value = True
     w._lift_errors.value = True
     assert viewer.layers["GT tracks"].display_graph is False  # native edges off
@@ -343,6 +352,7 @@ def test_camera_shared_display_per_view(make_napari_viewer):
     )
 
     w = SpacetimeWidget(viewer)
+    w._guess_once()  # deferred in the widget; run now so name-guessed roles are set
     # Lift-all view: tweak the shared camera and a per-view display param.
     w._lift_all.value = True
     viewer.camera.zoom = 3.3
@@ -372,6 +382,7 @@ def test_role_reassign_dedups_and_lifts_all(make_napari_viewer):
         viewer.add_tracks(np.array([[1, t, 5, 5] for t in range(6)], float), name=nm)
 
     w = SpacetimeWidget(viewer)
+    w._guess_once()  # deferred in the widget; run now so name-guessed roles are set
     # gt -> GT tracks, fp_edges -> ctc_fp (name-guessed)
     w._lift_errors.value = True
     assert w._role_combos["fp_edges"].value == "ctc_fp"
@@ -407,6 +418,7 @@ def test_divisualisation_lifts_all_tracks_incl_non_role(make_napari_viewer):
     extra.visible = False  # hidden, and not a named role
 
     w = SpacetimeWidget(viewer)
+    w._guess_once()  # deferred in the widget; run now so name-guessed roles are set
     w._lift_errors.value = True  # Divisualisation workflow
 
     # Role layer lifts with error-view color.
@@ -440,6 +452,7 @@ def test_layer_hidden_at_lift_time_folds_when_shown(make_napari_viewer):
     hidden.visible = False  # hidden in the flat view
 
     w = SpacetimeWidget(viewer)
+    w._guess_once()  # deferred in the widget; run now so name-guessed roles are set
     w._lift_amount.value = 12
     w._lift_errors.value = True  # -> ndisplay 3, lifts all incl. the hidden one
     QApplication.processEvents()
@@ -476,6 +489,7 @@ def test_divisualisation_hides_predicted_by_default(make_napari_viewer):
     )
 
     w = SpacetimeWidget(viewer)
+    w._guess_once()  # deferred in the widget; run now so name-guessed roles are set
     assert viewer.layers["predicted tracks"].visible
     w._lift_errors.value = True
     # Predicted is hidden by default in the Divisualisation view...
@@ -529,6 +543,7 @@ def test_division_edges_off_by_default(make_napari_viewer):
     n0 = len(viewer.layers["GT tracks"].data)
 
     w = SpacetimeWidget(viewer)
+    w._guess_once()  # deferred in the widget; run now so name-guessed roles are set
     assert w._division_edges.value is False
     # Toggling Divisualisation without checking the box leaves the layer alone.
     w._lift_errors.value = True
@@ -548,6 +563,7 @@ def test_division_edges_build_and_teardown(make_napari_viewer):
     n0 = len(viewer.layers["GT tracks"].data)
 
     w = SpacetimeWidget(viewer)
+    w._guess_once()  # deferred in the widget; run now so name-guessed roles are set
     w._division_edges.value = True
     w._lift_errors.value = True
 
@@ -582,6 +598,7 @@ def test_division_edges_augment_gt_and_pred(make_napari_viewer):
     n_pred = len(viewer.layers["predicted tracks"].data)
 
     w = SpacetimeWidget(viewer)
+    w._guess_once()  # deferred in the widget; run now so name-guessed roles are set
     w._role_combos["gt"].value = "GT tracks"
     w._role_combos["pred"].value = "predicted tracks"
     w._division_edges.value = True
@@ -614,6 +631,7 @@ def test_division_edges_checkbox_live_toggle(make_napari_viewer):
     n0 = len(viewer.layers["GT tracks"].data)
 
     w = SpacetimeWidget(viewer)
+    w._guess_once()  # deferred in the widget; run now so name-guessed roles are set
     w._lift_errors.value = True
     assert len(viewer.layers["GT tracks"].data) == n0  # box off, untouched
 
@@ -643,6 +661,7 @@ def test_division_edges_checkbox_preserves_visibility(make_napari_viewer):
     _add_dividing_gt(viewer, name="predicted tracks")
 
     w = SpacetimeWidget(viewer)
+    w._guess_once()  # deferred in the widget; run now so name-guessed roles are set
     w._role_combos["gt"].value = "GT tracks"
     w._role_combos["pred"].value = "predicted tracks"
     w._division_edges.value = True
@@ -673,6 +692,7 @@ def test_division_edges_hidden_layer_folds_when_shown(make_napari_viewer):
     _add_dividing_gt(viewer, name="predicted tracks")
 
     w = SpacetimeWidget(viewer)
+    w._guess_once()  # deferred in the widget; run now so name-guessed roles are set
     w._role_combos["gt"].value = "GT tracks"
     w._role_combos["pred"].value = "predicted tracks"
     w._lift_errors.value = True  # pred hidden by default
@@ -698,6 +718,7 @@ def test_division_edges_keep_layer_coloring(make_napari_viewer):
     _add_dividing_gt(viewer)
 
     w = SpacetimeWidget(viewer)
+    w._guess_once()  # deferred in the widget; run now so name-guessed roles are set
     w._division_edges.value = True
     w._lift_errors.value = True
 
