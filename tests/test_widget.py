@@ -36,7 +36,7 @@ def test_lift_all_keeps_coloring(make_napari_viewer):
 
     w = SpacetimeWidget(viewer)
     w._guess_once()  # deferred in the widget; run now so name-guessed roles are set
-    w._lift_amount.value = 15
+    w._lift_scale.value = 15
     w._lift_all.value = True
 
     # Both tracks layers lifted, keeping their own coloring.
@@ -62,7 +62,7 @@ def test_lift_all_sync_matches_main(make_napari_viewer):
     viewer.add_tracks(np.array([[1, t, 4, 4] for t in range(5)], float), name="tracks")
     w = SpacetimeWidget(viewer)
     w._guess_once()  # deferred in the widget; run now so name-guessed roles are set
-    w._lift_amount.value = 10
+    w._lift_scale.value = 10
     w._lift_all.value = True
 
     layer = viewer.layers["tracks"]
@@ -88,7 +88,7 @@ def test_errors_toggle_applies_role_look(make_napari_viewer):
     w._guess_once()  # deferred in the widget; run now so name-guessed roles are set
     assert w._role_combos["gt"].value == "GT tracks"  # name-guessed
 
-    w._lift_amount.value = 15
+    w._lift_scale.value = 15
     w._lift_errors.value = True
     layer = viewer.layers["GT tracks"]
     assert layer.data.shape[1] == 5
@@ -454,7 +454,7 @@ def test_layer_hidden_at_lift_time_folds_when_shown(make_napari_viewer):
 
     w = SpacetimeWidget(viewer)
     w._guess_once()  # deferred in the widget; run now so name-guessed roles are set
-    w._lift_amount.value = 12
+    w._lift_scale.value = 12
     w._lift_errors.value = True  # -> ndisplay 3, lifts all incl. the hidden one
     QApplication.processEvents()
 

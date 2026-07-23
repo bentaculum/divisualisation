@@ -101,7 +101,7 @@ for role, flag in (
     if layer is not None:
         role_names[role] = layer.name
 
-lift = SpacetimeLift(viewer, time_scale=12)
+lift = SpacetimeLift(viewer, lift_scale=12)
 lift.apply(role_names)  # goes 3D, folds time into z, applies the error-view look
 viewer.camera.zoom = 0.5  # pull back so the whole spacetime cone stays in frame
 

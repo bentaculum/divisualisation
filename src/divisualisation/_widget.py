@@ -96,13 +96,13 @@ class SpacetimeWidget(Container):
 
         # Two mutually exclusive toggles, each shown in its own box below. The
         # lift amount is one shared value but has a slider in each box; the two
-        # sliders mirror each other. ``_lift_amount`` (errors box) is canonical.
+        # sliders mirror each other. ``_lift_scale`` (errors box) is canonical.
         # Both toggles read "Lift tracks" -- which workflow each drives is given
         # by its enclosing box title ("Lift all tracks layers" / "Divisualisation").
         self._lift_all = ToggleSwitch(value=False, label="Lift tracks")
         self._lift_errors = ToggleSwitch(value=False, label="Lift tracks")
-        self._lift_amount = FloatSlider(value=12, min=1, max=50, label="Lift scale")
-        self._lift_amount_all = FloatSlider(value=12, min=1, max=50, label="Lift scale")
+        self._lift_scale = FloatSlider(value=12, min=1, max=50, label="Lift scale")
+        self._lift_scale_all = FloatSlider(value=12, min=1, max=50, label="Lift scale")
 
         # Error-view controls. Choices are CALLABLES (not static lists): napari's
         # add_dock_widget auto-connects layer inserted/removed/reordered/renamed
@@ -152,11 +152,11 @@ class SpacetimeWidget(Container):
 
         self._lift_all.changed.connect(self._on_toggle_all)
         self._lift_errors.changed.connect(self._on_toggle_errors)
-        self._lift_amount.changed.connect(
-            lambda *_: self._on_lift_amount(self._lift_amount)
+        self._lift_scale.changed.connect(
+            lambda *_: self._on_lift_scale(self._lift_scale)
         )
-        self._lift_amount_all.changed.connect(
-            lambda *_: self._on_lift_amount(self._lift_amount_all)
+        self._lift_scale_all.changed.connect(
+            lambda *_: self._on_lift_scale(self._lift_scale_all)
         )
         self._division_edges.changed.connect(self._on_division_edges_changed)
         self._compute_btn.changed.connect(self._on_compute)
@@ -170,10 +170,10 @@ class SpacetimeWidget(Container):
         # is a magicgui Container wrapped in a QGroupBox added to our native
         # layout; the widgets keep working as normal magicgui widgets.
         self._lift_all_box = Container(
-            widgets=[self._lift_all, self._lift_amount_all], labels=True
+            widgets=[self._lift_all, self._lift_scale_all], labels=True
         )
         self._divis_box = Container(
-            widgets=[self._lift_errors, self._lift_amount, *self._error_controls],
+            widgets=[self._lift_errors, self._lift_scale, *self._error_controls],
             labels=True,
         )
         for title, box in (
@@ -349,7 +349,7 @@ class SpacetimeWidget(Container):
             if e.applied:
                 e.revert()
         self._lift = engine
-        engine.time_scale = self._lift_amount.value
+        engine.lift_scale = self._lift_scale.value
         # Colored division edges (Divisualisation only). Augment the selected role
         # layers' data AFTER the revert above (so we edit FLAT data, never doubly
         # folded) and BEFORE engine.apply below (so the engine folds the augmented
@@ -382,19 +382,17 @@ class SpacetimeWidget(Container):
             if e.applied:
                 e.revert()
 
-    def _on_lift_amount(self, source):
+    def _on_lift_scale(self, source):
         # The two boxes each have a lift slider for one shared value; mirror the
         # one the user moved onto the other (signals blocked to avoid a loop),
         # then push the value to both engines.
         value = source.value
-        other = (
-            self._lift_amount_all if source is self._lift_amount else self._lift_amount
-        )
+        other = self._lift_scale_all if source is self._lift_scale else self._lift_scale
         if other.value != value:
             with other.changed.blocked():
                 other.value = value
         for e in (self._lift_all_engine, self._lift_errors_engine):
-            e.time_scale = value
+            e.lift_scale = value
 
     @contextmanager
     def _suspend_role_events(self):

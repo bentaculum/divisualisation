@@ -21,11 +21,11 @@ def viewer_with_layers():
 
 def test_apply_lifts_tracks_to_five_columns(viewer_with_layers):
     v = viewer_with_layers
-    lift = SpacetimeLift(v, time_scale=10)
+    lift = SpacetimeLift(v, lift_scale=10)
     lift.apply(["tracks"])
     tracks = v.layers["tracks"].data
     assert tracks.shape[1] == 5
-    # z == time_scale * t
+    # z == lift_scale * t
     np.testing.assert_allclose(tracks[:, 2], -10 * tracks[:, 1])
     assert v.dims.ndisplay == 3
 
@@ -33,19 +33,19 @@ def test_apply_lifts_tracks_to_five_columns(viewer_with_layers):
 def test_fold_accounts_for_z_display_scale():
     # A tracks layer with an anisotropic z display scale (e.g. 10x for the
     # C. elegans volume) must fold in WORLD units: the data-space z offset is
-    # divided by the z scale, so the cone's world steepness stays == time_scale
+    # divided by the z scale, so the cone's world steepness stays == lift_scale
     # regardless of the scale (not scale-times too steep).
     v = ViewerModel()
     # 3D+t tracks: [id, t, z, y, x] -> 4D layer, scale (t, z, y, x).
     data = np.array([[1, t, 0, 5, 5] for t in range(4)], float)
     v.add_tracks(data, name="tracks", scale=(1, 10, 1, 1))
-    lift = SpacetimeLift(v, time_scale=10)
+    lift = SpacetimeLift(v, lift_scale=10)
     lift.apply(["tracks"])
     folded = v.layers["tracks"].data
     z_scale = float(v.layers["tracks"].scale[1])
-    # data-space offset is time_scale / z_scale per frame ...
+    # data-space offset is lift_scale / z_scale per frame ...
     np.testing.assert_allclose(folded[:, 2], -(10 / z_scale) * folded[:, 1])
-    # ... so in WORLD units (z_scale * data) it is exactly time_scale per frame.
+    # ... so in WORLD units (z_scale * data) it is exactly lift_scale per frame.
     world_z = z_scale * folded[:, 2]
     np.testing.assert_allclose(world_z, -10 * folded[:, 1])
 
@@ -63,7 +63,7 @@ def test_revert_restores_exact_state(viewer_with_layers):
     orig_tracks = v.layers["tracks"].data.copy()
     orig_img_shape = v.layers["img"].data.shape
 
-    lift = SpacetimeLift(v, time_scale=10)
+    lift = SpacetimeLift(v, lift_scale=10)
     lift.apply(["tracks"])
     lift.revert()
 
@@ -85,7 +85,7 @@ def test_revert_restores_z_slider_for_3d_data():
     )
     v.dims.set_current_step(1, 3)  # z slider
     v.dims.set_current_step(0, 2)  # time slider
-    lift = SpacetimeLift(v, time_scale=12)
+    lift = SpacetimeLift(v, lift_scale=12)
     lift.apply(["tracks"])
     # scrub time while lifted; that should be kept, z should return to pre-lift.
     v.dims.set_current_step(0, 5)
@@ -97,18 +97,18 @@ def test_revert_restores_z_slider_for_3d_data():
 def test_round_trip_is_stable(viewer_with_layers):
     v = viewer_with_layers
     orig = v.layers["tracks"].data.copy()
-    lift = SpacetimeLift(v, time_scale=7)
+    lift = SpacetimeLift(v, lift_scale=7)
     for _ in range(3):
         lift.apply(["tracks"])
         lift.revert()
     assert np.array_equal(v.layers["tracks"].data, orig)
 
 
-def test_time_scale_slider_refolds_live(viewer_with_layers):
+def test_lift_scale_slider_refolds_live(viewer_with_layers):
     v = viewer_with_layers
-    lift = SpacetimeLift(v, time_scale=10)
+    lift = SpacetimeLift(v, lift_scale=10)
     lift.apply(["tracks"])
-    lift.time_scale = 25
+    lift.lift_scale = 25
     tracks = v.layers["tracks"].data
     np.testing.assert_allclose(tracks[:, 2], -25 * tracks[:, 1])
 
@@ -126,7 +126,7 @@ def test_deselected_tracks_stay_flat(viewer_with_layers):
 
 def test_double_apply_is_noop(viewer_with_layers):
     v = viewer_with_layers
-    lift = SpacetimeLift(v, time_scale=10)
+    lift = SpacetimeLift(v, lift_scale=10)
     lift.apply(["tracks"])
     tracks_after_first = v.layers["tracks"].data.copy()
     lift.apply(["tracks"])  # should do nothing
@@ -141,12 +141,12 @@ def test_revert_without_apply_is_safe(viewer_with_layers):
 
 def test_sweep_callback_updates_on_time_change(viewer_with_layers):
     v = viewer_with_layers
-    lift = SpacetimeLift(v, time_scale=10)
+    lift = SpacetimeLift(v, lift_scale=10)
     lift.apply(["tracks"])
-    v.dims.set_current_step(0, 2)  # scrub to t=2, time_scale=10
+    v.dims.set_current_step(0, 2)  # scrub to t=2, lift_scale=10
     layer = v.layers["tracks"]
     planes = layer.experimental_clipping_planes
-    # Verbatim main coupling: clip at t*time_scale=20, translate -t*scale=-20.
+    # Verbatim main coupling: clip at t*lift_scale=20, translate -t*scale=-20.
     enabled = [p for p in planes if p.enabled]
     assert enabled and enabled[0].position[0] == pytest.approx(-20)
     assert list(layer.translate) == pytest.approx([0, 20, 0, 0])
@@ -154,16 +154,16 @@ def test_sweep_callback_updates_on_time_change(viewer_with_layers):
 
 def test_lift_preserves_real_z_for_3d_tracks():
     # 3D tracks already have a real z; lifting adds the time offset on top of it
-    # (matching the original Divisualisation: z = z_real - time_scale * t).
+    # (matching the original Divisualisation: z = z_real - lift_scale * t).
     v = ViewerModel()
     v.add_image(np.random.rand(3, 2, 8, 8), name="vol")  # t, z, y, x
     v.add_tracks(
         np.array([[1, 0, 4.0, 5, 5], [1, 1, 4.0, 6, 6], [1, 2, 4.0, 7, 7]], float),
         name="tracks",
     )
-    lift = SpacetimeLift(v, time_scale=5)
+    lift = SpacetimeLift(v, lift_scale=5)
     lift.apply(["tracks"])
-    # z_real=4, time_scale=5, t=[0,1,2] -> 4 - 5*t = [4, -1, -6]
+    # z_real=4, lift_scale=5, t=[0,1,2] -> 4 - 5*t = [4, -1, -6]
     np.testing.assert_allclose(v.layers["tracks"].data[:, 2], [4, -1, -6])
     assert v.layers["tracks"].data.shape[1] == 5  # stays 5-col
 
@@ -191,7 +191,7 @@ def test_role_mapping_applies_and_restores_display():
     )
     orig = {ly.name: (ly.tail_length, ly.tail_width, ly.color_by) for ly in (gt, fn)}
 
-    lift = SpacetimeLift(v, time_scale=10)
+    lift = SpacetimeLift(v, lift_scale=10)
     lift.apply({"gt": "GT tracks", "fn_edges": "is_ctc_fn", "pred": "", "fp_edges": ""})
 
     # Common "error view" look on both; error role gets the doubled tail width.
@@ -213,7 +213,7 @@ def test_missing_roles_are_skipped():
     # All roles optional: a role pointing at no layer (blank) is simply skipped.
     v = ViewerModel()
     v.add_tracks(np.array([[1, 0, 5, 5], [1, 1, 6, 6]], float), name="GT tracks")
-    lift = SpacetimeLift(v, time_scale=8)
+    lift = SpacetimeLift(v, lift_scale=8)
     # Only gt is declared; pred/fn/fp are blank.
     lift.apply({"gt": "GT tracks", "pred": "", "fn_edges": "", "fp_edges": ""})
     assert v.layers["GT tracks"].data.shape[1] == 5
@@ -239,7 +239,7 @@ def test_lift_restores_all_display_params():
         for a in ("tail_width", "opacity", "head_length", "tail_length", "blending")
     }
 
-    lift = SpacetimeLift(v, time_scale=10)
+    lift = SpacetimeLift(v, lift_scale=10)
     lift.apply(["tracks"])  # lift-all overwrites some of these
     lift.revert()
 
@@ -258,7 +258,7 @@ def test_lifted_display_tweaks_persist_across_toggle():
         name="tracks",
         tail_width=2,
     )
-    lift = SpacetimeLift(v, time_scale=10)
+    lift = SpacetimeLift(v, lift_scale=10)
     lift.apply(["tracks"])
     v.layers["tracks"].tail_width = 12  # widen while lifted
     lift.revert()
@@ -278,7 +278,7 @@ def test_all_lifted_layers_share_head_length():
     v.add_tracks(np.array([[1, t, 5, 5] for t in range(6)], float), name="gt")
     err = v.add_tracks(np.array([[2, t, 8, 8] for t in range(6)], float), name="err")
     err.head_length = 1  # mimic add_edge_error_tracks
-    lift = SpacetimeLift(v, time_scale=10)
+    lift = SpacetimeLift(v, lift_scale=10)
     lift.apply({"gt": "gt", "fn_edges": "err", "pred": "", "fp_edges": ""})
     assert v.layers["gt"].head_length == 0
     assert v.layers["err"].head_length == 0
@@ -291,13 +291,13 @@ def test_slider_change_keeps_error_colors():
     v = ViewerModel()
     v.add_image(np.zeros((6, 8, 8)), name="raw")
     v.add_tracks(np.array([[1, t, 5, 5] for t in range(6)], float), name="gt")
-    lift = SpacetimeLift(v, time_scale=10)
+    lift = SpacetimeLift(v, lift_scale=10)
     lift.apply({"gt": "gt", "pred": "", "fn_edges": "", "fp_edges": ""})
     layer = v.layers["gt"]
     color_by = layer.color_by
     assert color_by == "_lift_gt"
     # move the lift slider
-    lift.time_scale = 30
+    lift.lift_scale = 30
     assert v.layers["gt"].color_by == color_by  # unchanged
     np.testing.assert_allclose(
         v.layers["gt"].data[:, 2], -30 * v.layers["gt"].data[:, 1]
@@ -312,13 +312,13 @@ def test_slider_refold_emits_no_color_by_warning():
     v = ViewerModel()
     v.add_image(np.zeros((6, 8, 8)), name="raw")
     v.add_tracks(np.array([[1, t, 5, 5] for t in range(6)], float), name="gt")
-    lift = SpacetimeLift(v, time_scale=10)
+    lift = SpacetimeLift(v, lift_scale=10)
     lift.apply({"gt": "gt", "pred": "", "fn_edges": "", "fp_edges": ""})
     assert v.layers["gt"].color_by == "_lift_gt"
 
     with warnings.catch_warnings():
         warnings.filterwarnings("error", message=".*not present in features.*")
-        lift.time_scale = 30  # slider move -> _refold_tracks
+        lift.lift_scale = 30  # slider move -> _refold_tracks
     # And the real coloring is still active afterwards, not reset to track_id.
     assert v.layers["gt"].color_by == "_lift_gt"
 
@@ -331,7 +331,7 @@ def test_lift_emits_no_invalid_divide_warning():
     v = ViewerModel()
     v.add_image(np.zeros((6, 8, 8)), name="raw")
     v.add_tracks(np.array([[1, t, 5, 5] for t in range(6)], float), name="gt")
-    lift = SpacetimeLift(v, time_scale=10)
+    lift = SpacetimeLift(v, lift_scale=10)
 
     with warnings.catch_warnings():
         warnings.filterwarnings("error", message="invalid value encountered in divide")
