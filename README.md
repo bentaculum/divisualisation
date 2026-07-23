@@ -4,9 +4,9 @@
 [![tests](https://github.com/bentaculum/divisualisation/workflows/Tests/badge.svg)](https://github.com/bentaculum/divisualisation/actions)
 [![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/divisualisation)](https://napari-hub.org/plugins/divisualisation)
 
-A napari plugin to visualise cell-tracking errors, computed via [`traccuracy`](https://github.com/live-image-tracking-tools/traccuracy/), and to lift 2D+time tracks into an interactive 3D "spacetime" view.
+A napari plugin to visualise cell-tracking errors, computed via [`traccuracy`](https://github.com/live-image-tracking-tools/traccuracy/), by lifting 2D/3D+time tracks into an interactive 3D "spacetime" view.
 
-> **📢 divisualisation is now a napari plugin.** What started as a scripted rendering effect is now installable from the napari hub and driven interactively from a dock widget — no code required. See [Installation](#installation) and [Usage](#usage).
+> **🆕 divisualisation is now a fully fledged napari plugin, with a stateful spacetime lifted view that integrates with regular napari workflows.**
 
 2D tracking (bacteria) | 3D tracking (C. elegans nuclei)
 :-: | :-:
@@ -81,11 +81,3 @@ Run `example_2d.py` (bacteria) or `example_3d.py` (C. elegans nuclei) in ipython
 Each loads its data into a napari viewer with the tracks and edge-error overlays
 and docks the widget, so you can toggle the lift and play the time slider
 yourself.
-
-### Rendering an animation
-
-To render the spacetime mp4 animations shown above without any GUI interaction,
-run `example_programmatic_2d.py`. It scripts the whole pipeline -- build the
-layers, fold time into `z` with `SpacetimeLift`, add the edge-error overlays
-with `add_edge_error_tracks`, then capture a `napari_animation` keyframe render
--- driving the same machinery the interactive plugin uses.
