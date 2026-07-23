@@ -1,6 +1,12 @@
-# Divisualisation
+# divisualisation
 
-Visualize cell tracking edge errors computed via [traccuracy](https://github.com/live-image-tracking-tools/traccuracy/) in napari.
+[![PyPI](https://img.shields.io/pypi/v/divisualisation.svg?color=green)](https://pypi.org/project/divisualisation)
+[![tests](https://github.com/bentaculum/divisualisation/workflows/Tests/badge.svg)](https://github.com/bentaculum/divisualisation/actions)
+[![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/divisualisation)](https://napari-hub.org/plugins/divisualisation)
+
+A napari plugin to visualise cell-tracking errors, computed via [`traccuracy`](https://github.com/live-image-tracking-tools/traccuracy/), and to lift 2D+time tracks into an interactive 3D "spacetime" view.
+
+> **📢 divisualisation is now a napari plugin.** What started as a scripted rendering effect is now installable from the napari hub and driven interactively from a dock widget — no code required. See [Installation](#installation) and [Usage](#usage).
 
 2D tracking (bacteria) | 3D tracking (C. elegans nuclei)
 :-: | :-:
@@ -13,28 +19,35 @@ We originally introduced these visualisations to compare our results in [_Tracka
 <video src='https://github.com/user-attachments/assets/99ac7295-cab5-43a0-9899-4fa007b110f7' width=60></video>
 
 
-### Installation
+## Installation
 
-Divisualisation is a [napari](https://napari.org) plugin.
+1. Please install napari as outlined [here](https://napari.org/stable/tutorials/fundamentals/installation.html).
 
-- Install [napari](https://napari.org/stable/tutorials/fundamentals/installation.html).
-- Install Divisualisation, either:
-  - from within napari via **Plugins → Install/Uninstall Plugins…** (search for
-    "divisualisation"), or
-  - from PyPI:
-    ```
-    pip install divisualisation
-    ```
-  - the latest development version from GitHub:
-    ```
-    pip install git+https://github.com/bentaculum/divisualisation.git
-    ```
+2. After that, install divisualisation, either:
+    - from within napari via **Plugins → Install/Uninstall Plugins…** (search for "divisualisation"),
+    - or from PyPI:
+      ```
+      pip install divisualisation
+      ```
+    - or the latest development version from GitHub:
+      ```
+      pip install git+https://github.com/bentaculum/divisualisation.git
+      ```
 
-### Usage
+Note: requires Python ≥ 3.11 and napari ≥ 0.8.
 
-There are two ways to use Divisualisation.
+## Usage
 
-#### Interactive: overlay errors on an existing viewer
+There are two ways to use divisualisation: the interactive napari plugin, or the functional API.
+
+### Plugin: lift tracks & overlay errors
+
+Open **Plugins → divisualisation → Lift tracks & Divisualisation**. The widget has two workflows, each in its own box with its own lift-amount slider:
+
+- **Lift all tracks layers** — fold time into a `z` axis so every tracks layer rises out of the moving image plane into a 3D "spacetime" cone, keeping each layer's own colouring. Scrub the time slider to sweep through the cone; toggle off to restore the flat 2D view exactly.
+- **Divisualisation** — pick your ground-truth / predicted / FN-edge / FP-edge tracks layers via the role dropdowns (auto-guessed from layer names), optionally **Compute edge errors** from the GT/predicted tracks plus their segmentation labels, and lift with the error-view colouring. A **Color division edges** checkbox draws each selected layer's parent→daughter division edges as coloured track tails (napari otherwise draws them in a fixed, uncolourable white).
+
+### Functional API: overlay errors on an existing viewer
 
 Call a single function on a viewer that already holds your data (image, masks,
 tracks — e.g. from motile-tracker) to add the edge errors on top. This works
@@ -62,31 +75,14 @@ entry) to align the overlay with your image/labels layers. See
 `example_programmatic_2d.py`, which uses `add_edge_error_tracks` as part of a
 fully scripted render.
 
-Divisualisation also ships an optional napari dock widget,
-**Plugins → Divisualisation → Lift tracks & Divisualisation**, with two mutually
-exclusive workflows (each in its own box, with its own lift-amount slider):
-
-- **Lift all tracks layers** — fold time into a `z` axis so every tracks layer
-  rises out of the moving image plane into a 3D "spacetime" cone, keeping each
-  layer's own coloring. Scrub the time slider to sweep through the cone; toggle
-  off to restore the flat 2D view exactly. This is the original `Divisualisation`
-  render effect, made interactive and reversible.
-- **Divisualisation** — pick your ground-truth / predicted / FN-edge / FP-edge
-  tracks layers via the role dropdowns (auto-guessed from layer names),
-  optionally **Compute edge errors** from the GT/predicted tracks plus their
-  segmentation labels, and lift with the error-view coloring. A **Color division
-  edges** checkbox draws each selected layer's parent→daughter division edges as
-  coloured track tails (napari otherwise draws them in a fixed, uncolourable
-  white).
-
-#### Examples
+### Examples
 
 Run `example_2d.py` (bacteria) or `example_3d.py` (C. elegans nuclei) in ipython.
 Each loads its data into a napari viewer with the tracks and edge-error overlays
 and docks the widget, so you can toggle the lift and play the time slider
 yourself.
 
-#### Rendering an animation
+### Rendering an animation
 
 To render the spacetime mp4 animations shown above without any GUI interaction,
 run `example_programmatic_2d.py`. It scripts the whole pipeline -- build the
