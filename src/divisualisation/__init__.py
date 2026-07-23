@@ -7,6 +7,5 @@ except Exception:
 
 from .errors import add_edge_error_tracks
 from .lift import SpacetimeLift
-from .spacetime import Divisualisation
 
-__all__ = ["Divisualisation", "SpacetimeLift", "add_edge_error_tracks"]
+__all__ = ["SpacetimeLift", "add_edge_error_tracks"]

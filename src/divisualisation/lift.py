@@ -18,17 +18,6 @@ from napari.utils.colormaps.colormap_utils import vispy_or_mpl_colormap
 logger = logging.getLogger(__name__)
 
 
-def _clipping_planes(cut_at: float):
-    """Clip everything ahead of ``cut_at`` along the first (folded-time) axis."""
-    return [
-        # Disabled placeholder: its normal is never used, but napari normalizes
-        # the normal on construction, so a zero vector triggers a numpy
-        # "invalid value encountered in divide" warning. Use a unit vector.
-        {"position": (0, 0, 0), "normal": (1, 0, 0), "enabled": False},
-        {"position": (cut_at, 0, 0), "normal": (-1, 0, 0), "enabled": True},
-    ]
-
-
 # Every lifted layer gets a single constant color property, so each renders as
 # one flat color; the actual color is the layer's active colormap (chosen in the
 # GUI dropdown). The Tracks layer min-max normalizes the property before mapping,
@@ -133,17 +122,17 @@ class SpacetimeLift:
 
     Args:
         viewer: The napari viewer to transform.
-        time_scale: How far tracks lift per unit time. Higher = steeper cone.
+        lift_scale: How far tracks lift per unit time. Higher = steeper cone.
     """
 
     def __init__(
         self,
         viewer: napari.Viewer,
-        time_scale: float = 12,
+        lift_scale: float = 12,
         camera_store: dict | None = None,
     ):
         self._viewer = viewer
-        self._time_scale = time_scale
+        self._lift_scale = lift_scale
         self._applied = False
         # Internal state keyed by the LAYER OBJECT (not its name, which the
         # user can change): renaming a lifted layer must not strand it.
@@ -195,12 +184,12 @@ class SpacetimeLift:
         cam.perspective = state["perspective"]
 
     @property
-    def time_scale(self) -> float:
-        return self._time_scale
+    def lift_scale(self) -> float:
+        return self._lift_scale
 
-    @time_scale.setter
-    def time_scale(self, value: float):
-        self._time_scale = value
+    @lift_scale.setter
+    def lift_scale(self, value: float):
+        self._lift_scale = value
         if self._applied:
             self._refold_tracks()
             self._update_sweep()
@@ -285,7 +274,7 @@ class SpacetimeLift:
             # lifted cone's height, keeping the framed y/x.
             n_timepoints = self._viewer.dims.nsteps[0]
             center = list(self._viewer.camera.center)
-            center[0] = 0.5 * self._time_scale * n_timepoints
+            center[0] = 0.5 * self._lift_scale * n_timepoints
             self._viewer.camera.center = center
         # Restore the timepoint (reset_view / data changes reset it); this also
         # drives _update_sweep to the right slice via the point event. Set only
@@ -543,7 +532,7 @@ class SpacetimeLift:
 
     def _folded(self, base: np.ndarray, z_scale: float = 1.0) -> np.ndarray:
         data = base.copy()
-        # z <- z - (time_scale / z_scale) * t, so tracks rise out of the plane
+        # z <- z - (lift_scale / z_scale) * t, so tracks rise out of the plane
         # over time. The depth axis points towards the viewer since napari 0.6,
         # so the time term is subtracted to lift upward. Preserves any real z.
         #
@@ -551,9 +540,9 @@ class SpacetimeLift:
         # napari renders z at ``z_scale * z_data``, so with an anisotropic layer
         # (e.g. z shown 10x for the C. elegans volume) an unscaled offset would
         # make the cone z_scale-times too steep and mis-align the time sweep. In
-        # world space the offset is then exactly ``time_scale * t``, matching the
+        # world space the offset is then exactly ``lift_scale * t``, matching the
         # (world-unit) clip position and translate in _update_sweep.
-        data[:, 2] = base[:, 2] - (self._time_scale / z_scale) * base[:, 1]
+        data[:, 2] = base[:, 2] - (self._lift_scale / z_scale) * base[:, 1]
         return data
 
     @staticmethod
@@ -619,10 +608,10 @@ class SpacetimeLift:
     def _update_sweep(self, event=None):
         """Sync each lifted tracks layer to the current timepoint.
 
-        Clip the tracks at ``-t * time_scale`` along the folded-time (z) axis
-        and translate them by ``+t * time_scale`` there, so the current
+        Clip the tracks at ``-t * lift_scale`` along the folded-time (z) axis
+        and translate them by ``+t * lift_scale`` there, so the current
         timepoint's slice lands on the fixed image plane and later frames recede
-        above it as you scrub. Signs follow the fold (``z = z - time_scale * t``,
+        above it as you scrub. Signs follow the fold (``z = z - lift_scale * t``,
         upward under napari 0.6+ axis directions). Image/labels are untouched.
         """
         t = self._viewer.dims.point[0]
@@ -631,14 +620,14 @@ class SpacetimeLift:
             # napari's normal-normalization ("invalid value in divide").
             {"position": (0, 0, 0), "normal": (1, 0, 0), "enabled": False},
             {
-                "position": (-t * self._time_scale, 0, 0),
+                "position": (-t * self._lift_scale, 0, 0),
                 "normal": (1, 0, 0),
                 "enabled": True,
             },
         ]
         for layer in self._track_bases:
             layer.experimental_clipping_planes = clipping_planes
-            layer.translate = [0, self._time_scale * t, 0, 0]
+            layer.translate = [0, self._lift_scale * t, 0, 0]
 
 
 def _is_tracks(layer) -> bool:
