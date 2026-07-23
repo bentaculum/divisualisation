@@ -95,12 +95,16 @@ def _mask_centroids(frame: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     ids = frame[coords].astype(np.intp)
     if len(ids) == 0:
         return np.empty(0, dtype=int), np.empty((0, frame.ndim))
-    counts = np.bincount(ids)
-    centroids = np.empty((len(counts), frame.ndim))
+    # Bin over DISTINCT labels (via unique+inverse) rather than raw label ids, so
+    # memory is O(#masks) not O(max_label): tracking segmentations often carry
+    # large sparse global ids (max ~1e6) that would otherwise make bincount
+    # allocate a huge array per frame regardless of how few masks it has.
+    labels, inv = np.unique(ids, return_inverse=True)  # labels sorted, non-zero
+    counts = np.bincount(inv)
+    centroids = np.empty((len(labels), frame.ndim))
     for d, coord in enumerate(coords):
-        centroids[:, d] = np.bincount(ids, weights=coord.astype(float))
-    labels = np.nonzero(counts)[0]  # sorted non-zero label ids
-    centroids = centroids[labels] / counts[labels, None]
+        centroids[:, d] = np.bincount(inv, weights=coord.astype(float))
+    centroids /= counts[:, None]
     return labels.astype(int), centroids
 
 
