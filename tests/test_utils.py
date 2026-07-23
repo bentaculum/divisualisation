@@ -87,7 +87,7 @@ def test_division_connection_rows_extend_daughters_to_division():
     import numpy as np
     from napari.layers import Tracks
 
-    from divisualisation._widget import SpacetimeWidget
+    from divisualisation.division_edges import ColoredDivisionEdges
 
     graph = _dividing_2d_graph()
     # Layers are built by the examples with the division node dropped, so each
@@ -97,7 +97,7 @@ def test_division_connection_rows_extend_daughters_to_division():
     )
     layer = Tracks(tracks, graph=tracks_graph)
 
-    rows = SpacetimeWidget._division_connection_rows(layer)
+    rows = ColoredDivisionEdges._connection_rows(layer)
     # Two divisions (1->2, 1->3): one appended vertex each.
     assert rows.shape == (2, 4)  # [track_id, t, y, x]
     # Each row carries a DAUGHTER track id at the PARENT's last position (node 1
@@ -110,11 +110,11 @@ def test_division_connection_rows_extend_daughters_to_division():
 def test_division_connection_rows_none_without_divisions():
     from napari.layers import Tracks
 
-    from divisualisation._widget import SpacetimeWidget
+    from divisualisation.division_edges import ColoredDivisionEdges
 
     # A single linear track has an empty graph -> no division connections.
     tracks, tracks_graph, _ = graph_to_napari_tracks(
         _linear_2d_graph(), include_z=False
     )
     layer = Tracks(tracks, graph=tracks_graph)
-    assert SpacetimeWidget._division_connection_rows(layer) is None
+    assert ColoredDivisionEdges._connection_rows(layer) is None

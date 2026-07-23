@@ -31,7 +31,6 @@ import logging
 from contextlib import contextmanager
 
 import napari
-import numpy as np
 from magicgui.backends._qtpy.widgets import QBaseValueWidget
 from magicgui.widgets import CheckBox, ComboBox, Container, FloatSlider, PushButton
 from magicgui.widgets.bases import ValueWidget
@@ -39,6 +38,7 @@ from qtpy.QtCore import QTimer  # type: ignore[attr-defined]
 from qtpy.QtWidgets import QGroupBox, QVBoxLayout  # type: ignore[attr-defined]
 from superqt import QToggleSwitch
 
+from .division_edges import ColoredDivisionEdges
 from .lift import ROLES, SpacetimeLift, _is_labels, _is_tracks
 
 logger = logging.getLogger(__name__)
@@ -80,11 +80,10 @@ class SpacetimeWidget(Container):
     def __init__(self, viewer: "napari.viewer.Viewer"):
         super().__init__()
         self._viewer = viewer
-        # Colored-division-edge state. Role layers we augmented in place (added
-        # division-connection vertices so the divisions draw as the layer's own
-        # colored tail), keyed by the layer OBJECT -> its original state (data,
-        # display_graph, properties, color_by) to restore on teardown.
-        self._suppressed_graphs: dict = {}
+        # Draws the selected role layers' division edges as coloured tail (see
+        # division_edges.py); the widget picks which layers, this owns the
+        # in-place augmentation + restore.
+        self._div_edges = ColoredDivisionEdges()
         # One lift engine per toggle view, so each view keeps its own
         # layer-control settings. They share a camera store, so the camera
         # (center/zoom/angles/perspective) is shared across the two views.
@@ -254,7 +253,7 @@ class SpacetimeWidget(Container):
                 self._revert_lift()
             # Revert (above) restores each source layer's own graph via the
             # engine snapshot; drop our edge layers and suppression bookkeeping.
-            self._teardown_division_edges()
+            self._div_edges.teardown()
 
     def _on_division_edges_changed(self, *_):
         # Only meaningful in an active Divisualisation view. Re-run the standard
@@ -357,7 +356,7 @@ class SpacetimeWidget(Container):
         if engine is self._lift_errors_engine:
             self._rebuild_division_edges()
         else:
-            self._teardown_division_edges()
+            self._div_edges.teardown()
         # Always lift EVERY tracks layer. In the errors workflow ``target`` is a
         # role mapping (those get error-view colors); every other tracks layer
         # (incl. hidden, non-role ones) is lifted too, keeping its own coloring.
@@ -365,7 +364,7 @@ class SpacetimeWidget(Container):
         # After apply, sync the layer-controls "graph" checkbox to our
         # display_graph change and force a redraw so re-augmented layers render at
         # their folded (lifted) positions rather than the flat z=0 plane.
-        self._finalize_division_edges()
+        self._div_edges.finalize(self._viewer)
         if visible_before is not None:
             # Coloring-only re-apply: restore exactly the visibility we had,
             # don't re-run the hide policy.
@@ -482,226 +481,47 @@ class SpacetimeWidget(Container):
                 continue
             yield role, layer
 
-    @staticmethod
-    def _division_connection_rows(layer):
-        """Rows to append to a layer's data so its division edges draw as tail.
-
-        napari's Tracks ``graph`` maps ``child_track_id -> [parent_track_ids]``
-        and draws those parent->daughter edges in a fixed, uncolorable white. To
-        get them in the layer's OWN (colored) tail instead, we extend each
-        daughter track back to the division point: add a vertex carrying the
-        DAUGHTER's track id at the PARENT's last position (max time). The daughter
-        tail then starts at the division node, so the edge is drawn as tail.
-
-        Returns an ``(N, cols)`` array of ``[track_id, t, (z,) y, x]`` rows (one
-        per division edge, matching the layer's column count), or ``None`` if the
-        layer has no divisions.
-        """
-        graph = dict(layer.graph)
-        if not graph:
-            return None
-        data = np.asarray(layer.data, dtype=float)  # [track_id, t, (z,) y, x]
-        if len(data) == 0:
-            return None
-
-        # Precompute each track's LAST vertex (max time) in one vectorized pass,
-        # rather than re-scanning the whole array per division (which was
-        # O(divisions x vertices)). Sort by (track_id, t); the last row of each
-        # track_id group is its last vertex.
-        order = np.lexsort((data[:, 1], data[:, 0]))  # by track_id, then t
-        sorted_data = data[order]
-        sorted_ids = sorted_data[:, 0]
-        # A row is the last of its group iff the next row has a different id.
-        is_last = np.empty(len(sorted_data), dtype=bool)
-        is_last[-1] = True
-        is_last[:-1] = sorted_ids[1:] != sorted_ids[:-1]
-        last_rows = sorted_data[is_last]
-        last_by_track = {int(r[0]): r for r in last_rows}
-
-        rows = []
-        for child, parents in graph.items():
-            for parent in np.atleast_1d(parents):
-                parent_last = last_by_track.get(int(parent))
-                if parent_last is None:
-                    continue
-                # Daughter id, at the parent's last position -> extends the
-                # daughter's tail back to the division point.
-                rows.append([float(child), *parent_last[1:]])
-        if not rows:
-            return None
-        return np.asarray(rows, dtype=float)
-
     def _rebuild_division_edges(self):
-        """Fold division edges into the selected role layers' own colored tails.
+        """Colour the selected role layers' division edges (if the box is on).
 
-        MUST be called while the lift is reverted (edits flat source data) and
-        before ``engine.apply`` (which then folds the augmented data with the
-        rest). For each selected role layer with divisions, appends a vertex per
-        division edge so it draws as the layer's own tail (see
-        ``_division_connection_rows``), and turns off the layer's native white
-        graph edges. The original data + ``display_graph`` are stashed and put
-        back by ``_teardown_division_edges``.
+        Owns the widget-side policy -- checkbox gate, which layers, and the
+        user-facing warnings -- and delegates the in-place augmentation to
+        ``self._div_edges``. MUST run while the lift is reverted and before
+        ``engine.apply`` (see ``_apply_lift``); ``_div_edges.apply`` tears down
+        any previous augmentation first.
         """
-        self._teardown_division_edges()
-        logger.debug(
-            "[divedges] rebuild: checkbox=%s errors_toggle=%s engine_applied=%s",
-            self._division_edges.value,
-            self._lift_errors.value,
-            self._lift_errors_engine.applied,
-        )
         if not self._division_edges.value:
-            logger.debug("[divedges] checkbox off -> nothing to do")
+            self._div_edges.teardown()
             return
         selected = list(self._selected_role_layers())
         logger.debug(
-            "[divedges] role values=%s -> selected layers=%s",
-            {r: c.value for r, c in self._role_combos.items()},
+            "[divedges] rebuild: selected layers=%s",
             [layer.name for _r, layer in selected],
         )
         if not selected:
             # The feature only acts on layers picked in the role dropdowns; with
             # none selected it would silently do nothing. Say so.
-            logger.warning("[divedges] no role layer selected -> nothing drawn")
+            self._div_edges.teardown()
             napari.utils.notifications.show_warning(
                 "Color division edges: no role layer selected -- pick a tracks "
                 "layer in the GT (or FN/FP) dropdown."
             )
             return
-        augmented_any = False
-        for _role, layer in selected:
-            rows = self._division_connection_rows(layer)
-            logger.debug(
-                "[divedges] %r (role=%s): graph_size=%d, ndata=%d, connection_rows=%s",
-                layer.name,
-                _role,
-                len(dict(layer.graph)),
-                len(layer.data),
-                None if rows is None else len(rows),
-            )
-            if rows is None:
-                continue
-            # Stash originals to restore on teardown. The engine snapshots data
-            # AFTER we edit it here (its snapshot runs at apply time), so revert
-            # alone would restore the augmented data -- we own this restore.
-            self._suppressed_graphs[layer] = {
-                "data": np.asarray(layer.data).copy(),
-                "graph": dict(layer.graph),
-                "display_graph": layer.display_graph,
-                "properties": {k: v.copy() for k, v in layer.properties.items()},
-                "color_by": layer.color_by,
-            }
-            augmented = np.vstack([np.asarray(layer.data, dtype=float), rows])
-            # Augmenting drops the graph (setting .data resets it) -- fine, the
-            # divisions live in the tail now; the original graph is stashed above
-            # and restored on teardown so the native edges work again.
-            self._set_tracks_data(
-                layer, augmented, graph={}, prior=self._suppressed_graphs[layer]
-            )
-            # Divisions are in the colored tail now; hide the native white edges.
-            layer.display_graph = False
-            augmented_any = True
-            logger.debug(
-                "[divedges] %r augmented -> ndata=%d, display_graph=%s, color_by=%s",
-                layer.name,
-                len(layer.data),
-                layer.display_graph,
-                layer.color_by,
-            )
+        augmented_any = self._div_edges.apply([layer for _r, layer in selected])
         if not augmented_any:
-            # Roles are selected but none has a division graph to draw.
-            logger.warning("[divedges] selected layers had no divisions to draw")
             napari.utils.notifications.show_warning(
                 "Color division edges: the selected tracks layer(s) have no "
                 "divisions (empty graph)."
             )
 
-    def _finalize_division_edges(self):
-        """Post-apply fixups for augmented layers.
-
-        Run AFTER ``engine.apply``, where we mutated ``display_graph`` / ``data``
-        / ``graph`` inside the engine's blocked-events context. Re-emit
-        ``display_graph`` so the vispy layer hides the native white graph edges
-        (its ``_on_appearance_change`` listens to that event), and ``refresh()``
-        forces a redraw at the folded positions rather than the flat z=0 plane.
-
-        Note: this does NOT update the layer-controls "graph" checkbox, which
-        stays visually stale -- napari's QtGraphCheckBoxControl only binds
-        checkbox->layer, not layer->checkbox (see its own source comment), so a
-        programmatic display_graph change can't drive the widget. Cosmetic only;
-        the edges render correctly.
-        """
-        for layer in self._suppressed_graphs:
-            if layer not in self._viewer.layers:
-                continue
-            layer.events.display_graph()
-            layer.refresh()
-
-    @staticmethod
-    def _set_tracks_data(layer, data, graph, prior):
-        """Set a Tracks layer's data + graph, preserving its coloring.
-
-        Setting ``.data`` clears the graph and resets properties to just
-        ``track_id``; re-apply ``graph`` and the prior properties (padded to the
-        new length with the column's last value) and ``color_by`` so the layer
-        keeps its coloring for the added vertices.
-        """
-        prior_props = prior["properties"]
-        prior_color_by = prior["color_by"]
-        layer.color_by = "track_id"  # always-present; avoids a transient warning
-        # napari skips updating a HIDDEN layer's ndim/extent when its data
-        # changes, so augmenting/restoring a hidden layer leaves a stale extent
-        # and it renders unlifted (flat) once shown. Set the data while
-        # momentarily visible so the extent updates, then restore visibility.
-        was_visible = layer.visible
-        layer.visible = True
-        layer.data = data
-        layer.visible = was_visible
-        layer.graph = graph
-        n = len(layer.data)
-        rebuilt = {}
-        for key, values in prior_props.items():
-            values = np.asarray(values)
-            if len(values) == n:
-                rebuilt[key] = values
-            elif len(values):
-                pad = np.full(n - len(values), values[-1])
-                rebuilt[key] = np.concatenate([values, pad])
-        if rebuilt:
-            layer.properties = rebuilt
-        if prior_color_by in layer.properties or not layer.properties:
-            layer.color_by = prior_color_by
-
     def _on_native_destroyed(self, *_):
-        # The Qt widget is being destroyed. By this point the magicgui container
-        # may already be partially torn down (attribute access raising via its
-        # __getattr__), and the viewer may be gone, so guard the restore. Nothing
-        # to restore if we never augmented anything.
-        if not getattr(self, "_suppressed_graphs", None):
-            return
+        # The Qt widget is being destroyed; the magicgui container may already be
+        # partially torn down (attribute access raising via its __getattr__), so
+        # guard the restore.
         try:
-            self._teardown_division_edges()
+            self._div_edges.teardown()
         except (AttributeError, RuntimeError):
             pass
-
-    def _teardown_division_edges(self):
-        """Restore any role layers we augmented back to their original state.
-
-        Safe to call whether or not a lift is active. Puts back each layer's
-        original data, graph, coloring and ``display_graph``. This is the
-        authoritative restore path: the engine snapshots data AFTER our edit, so
-        its own revert would otherwise keep the augmented data.
-        """
-        if self._suppressed_graphs:
-            logger.debug(
-                "[divedges] teardown: restoring %d layer(s): %s",
-                len(self._suppressed_graphs),
-                [layer.name for layer in self._suppressed_graphs],
-            )
-        for layer, prior in list(self._suppressed_graphs.items()):
-            if layer in self._viewer.layers:
-                self._set_tracks_data(layer, prior["data"], prior["graph"], prior)
-                layer.display_graph = prior["display_graph"]
-        self._suppressed_graphs.clear()
 
     # --- layer discovery ----------------------------------------------------
 
@@ -830,7 +650,7 @@ class SpacetimeWidget(Container):
         # their original data before CTC matching reads them, so the added
         # division-connection vertices don't leak into the computation. The
         # trailing _apply_lift re-augments them.
-        self._teardown_division_edges()
+        self._div_edges.teardown()
 
         # Give the error overlays the same SPATIAL scale as the GT tracks layer
         # (e.g. an anisotropic z shown 10x), so they align with the image/tracks
