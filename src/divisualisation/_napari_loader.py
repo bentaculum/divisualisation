@@ -6,10 +6,13 @@ Vendored from traccuracy PR #358
 lets divisualisation depend on a RELEASED traccuracy from PyPI (``traccuracy>=
 ...``) rather than pinning the PR git branch (PyPI rejects git dependencies).
 
-The only change from upstream is the ``TrackingGraph`` import (public top-level
-path instead of ``traccuracy._tracking_graph``); see the import below. Drop this
-module and switch back to ``from traccuracy.loaders import load_napari_data``
-once PR #358 is merged and released.
+The only functional change from upstream is the ``TrackingGraph`` import
+(public top-level path instead of ``traccuracy._tracking_graph``); see the
+import below. The performance/progress-bar improvements once carried here (the
+vectorized ``_mask_centroids`` and the ``progbar_class`` hook) have been pushed
+back to PR #358, so the two copies now share the same logic. Drop this module
+and switch back to ``from traccuracy.loaders import load_napari_data`` once
+PR #358 is merged and released.
 """
 
 from __future__ import annotations
