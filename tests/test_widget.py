@@ -124,7 +124,7 @@ def test_toggles_are_mutually_exclusive(make_napari_viewer):
     assert viewer.dims.ndisplay == 2
 
 
-def test_errors_controls_hidden_until_errors_toggle(make_napari_viewer):
+def test_errors_controls_visible_before_toggle(make_napari_viewer):
     from qtpy.QtWidgets import QApplication
 
     from divisualisation._widget import SpacetimeWidget
@@ -144,13 +144,14 @@ def test_errors_controls_hidden_until_errors_toggle(make_napari_viewer):
     QApplication.processEvents()
     QApplication.processEvents()
 
-    # Error controls hidden until the errors toggle is on.
-    assert not w._compute_btn.visible
+    # The error controls (Compute button, role/labels dropdowns) are shown and
+    # usable from the start -- before the Divisualisation toggle is on -- so
+    # layers can be picked up front. They stay visible once the toggle goes on.
+    assert w._compute_btn.visible
+    assert w._role_combos["gt"].value == "GT tracks"  # name-guessed
+    assert w._gt_labels.value == "gt masks"
     w._lift_errors.value = True
     assert w._compute_btn.visible
-    # Roles/labels are name-guessed and usable immediately (before any lift).
-    assert w._role_combos["gt"].value == "GT tracks"
-    assert w._gt_labels.value == "gt masks"
 
 
 def test_toggles_are_toggle_switches(make_napari_viewer):
